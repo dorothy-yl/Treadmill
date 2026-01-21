@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "@I18n.t('set_goals')",
+  "navigationBarBackgroundColor": "#0A0E27",
+  "navigationBarTextStyle": "white",
+  "navigationStyle": "custom"
+}
