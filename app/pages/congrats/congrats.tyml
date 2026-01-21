@@ -23,7 +23,7 @@
              <text class="ring-value">{{caloriesBurned}}</text>
              <text class="ring-unit">{{kcalUnit}}</text>
           </view>
-          <text class="ring-label">{{burnCaloriesLabel}}</text>
+          <text class="ring-label">{{caloriesLabel}}</text>
         </view>
       </view>
     </view>
@@ -33,12 +33,12 @@
       <view class="stats-card wide-card">
         <view class="stat-item">
           <text class="stat-value">{{duration}}</text>
-          <text class="stat-label">{{totalDurationLabel}}</text>
+          <text class="stat-label">{{workoutTimeLabel}}</text>
         </view>
         <view class="vertical-line"></view>
         <view class="stat-item">
-          <text class="stat-value">{{rpm}}</text>
-          <text class="stat-label">{{rpmLabel}}</text>
+          <text class="stat-value">{{hrBpm}}</text>
+          <text class="stat-label">{{hrBpmLabel}}</text>
         </view>
       </view>
 
@@ -57,14 +57,14 @@
 
         <!-- Right Column -->
         <view class="right-column">
-          <!-- Power Card -->
+          <!-- Incline Card -->
           <view class="stats-card small-card">
-            <text class="card-title">{{powerLabel}}</text>
+            <text class="card-title">{{inclineLabel}}</text>
             <view class="card-icon-small">
-              <image src="../../assets/icons/Vector 2.svg" mode="aspectFit"></image>
+              <image src="../../assets/icons/Group 19.png" mode="aspectFit"></image>
             </view>
             <view class="small-value-row">
-              <text class="medium-value">{{watt}}</text>
+              <text class="medium-value">{{incline}}</text>
             </view>
           </view>
           <!-- Distance Card -->

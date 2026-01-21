@@ -1,7 +1,8 @@
 <view class="container">
 <view class="page-title">{{pageTitle}}</view>
   <view class="exercise-summary">
-    <view class="summary-left">
+  <view class="summary-left">
+    <view class="summary-group">
       <view class="summary-item">
         <text class="summary-value">{{exerciseTime}}</text>
         <text class="summary-label">{{exerciseTimeLabel}}</text>
@@ -11,14 +12,16 @@
         <text class="summary-label">{{distanceLabel}}</text>
       </view>
     </view>
-    <view class="summary-right">
-      <view class="bicycle-circle-outer">
-        <view class="bicycle-circle-inner">
-          <image class="bicycle-image" src="../../assets/treadmill.png" mode="aspectFit"></image>
-        </view>
+  </view>
+
+  <view class="summary-right">
+    <view class="bicycle-circle-outer">
+      <view class="bicycle-circle-inner">
+        <image class="bicycle-image" src="../../assets/treadmill.png" mode="aspectFit"></image>
       </view>
     </view>
   </view>
+</view>
 
   <view class="common-functions">
     <view class="section-title">{{commonFunctionsLabel}}</view>

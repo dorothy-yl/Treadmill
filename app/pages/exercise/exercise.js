@@ -45,6 +45,7 @@ Page({
     powerWLabel: '',
     distanceKmLabel: '',
     loadLabel: '',
+    inclineLabel: '',
     startHoldStopLabel: ''
   },
   timer: null,
@@ -81,6 +82,7 @@ Page({
       powerWLabel: currentI18n.t('power_w'),
       distanceKmLabel: currentI18n.t('distance_km'),
       loadLabel: currentI18n.t('load'),
+      inclineLabel: currentI18n.t('incline'),
       startHoldStopLabel: currentI18n.t('start_hold_stop')
     });
     
@@ -914,7 +916,7 @@ throttle(func, delay) {
 
   // 仅更新视觉位置（不更新load数据和发送命令）
   updateGaugeVisual(value) {
-    const maxLoad = 32;
+    const maxLoad = 15; // 改为坡度范围 0-15
     const currentValue = Math.min(Math.max(value, 0), maxLoad);
     const maxAngle = 270;
     const progressAngle = (currentValue / maxLoad) * maxAngle;
@@ -950,7 +952,7 @@ throttle(func, delay) {
     if (adjustedAngle > endAngle) adjustedAngle = endAngle;
   
     const progress = (adjustedAngle - startAngle) / maxSweep;
-    const maxLoad = 32;
+    const maxLoad = 15; // 改为坡度范围 0-15
     const newLoad = Math.min(Math.floor(progress * maxLoad), maxLoad);
   
     this.tempLoad = newLoad;
@@ -1002,8 +1004,48 @@ throttle(func, delay) {
     this.tempLoad = null;
   },
 
+  // 处理速度增加
+  handleIncreaseSpeed() {
+    const currentSpeed = parseFloat(this.data.speed) || 0;
+    const newSpeed = Math.min(currentSpeed + 0.1, 99.9); // 限制最大速度为 99.9
+    this.setData({
+      speed: newSpeed.toFixed(1)
+    });
+    // 如果需要同步到硬件，可以在这里添加设备命令
+    const { query: { deviceId } } = ty.getLaunchOptionsSync();
+    if (deviceId) {
+      // 假设速度通过某个 DP 点控制，需要根据实际硬件协议调整
+      // ty.device.publishDps({
+      //   deviceId,
+      //   dps: { 105: Math.round(newSpeed * 1000) }, // 根据实际协议调整
+      //   mode: 1,
+      //   pipelines: [0, 1, 2, 3, 4, 5, 6]
+      // });
+    }
+  },
+
+  // 处理速度减少
+  handleDecreaseSpeed() {
+    const currentSpeed = parseFloat(this.data.speed) || 0;
+    const newSpeed = Math.max(currentSpeed - 0.1, 0); // 限制最小速度为 0
+    this.setData({
+      speed: newSpeed.toFixed(1)
+    });
+    // 如果需要同步到硬件，可以在这里添加设备命令
+    const { query: { deviceId } } = ty.getLaunchOptionsSync();
+    if (deviceId) {
+      // 假设速度通过某个 DP 点控制，需要根据实际硬件协议调整
+      // ty.device.publishDps({
+      //   deviceId,
+      //   dps: { 105: Math.round(newSpeed * 1000) }, // 根据实际协议调整
+      //   mode: 1,
+      //   pipelines: [0, 1, 2, 3, 4, 5, 6]
+      // });
+    }
+  },
+
   updateGauge(value) {
-    const maxLoad = 32;
+    const maxLoad = 15; // 改为坡度范围 0-15
     const currentValue = Math.min(Math.max(value, 0), maxLoad); // Ensure bounds
     const maxAngle = 270;
     const progressAngle = (currentValue / maxLoad) * maxAngle;

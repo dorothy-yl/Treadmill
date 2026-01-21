@@ -8,11 +8,11 @@
     <view class="header-placeholder"></view>
   </view>
 
-  <!-- Speed and Heart Rate Row -->
+  <!-- HR and Calories Row -->
   <view class="top-row">
     <view class="top-stat-item">
-      <text class="top-stat-value">{{speed}}</text>
-      <text class="top-stat-label">{{speedKmhLabel}}</text>
+      <text class="top-stat-value">{{heartRate}}</text>
+      <text class="top-stat-label">{{hrBpmLabel}}</text>
     </view>
     <view class="vertical-divider"></view>
     <view class="top-stat-item">
@@ -36,10 +36,18 @@
     <text class="timer-display">{{distance}}</text>
   </view>
 
-   <!-- Distance Card -->
-  <view class="card timer-card">
-    <text class="card-label">{{distanceKmLabel}}</text>
-    <text class="timer-display">{{Speed (km/h)}}</text>
+  <!-- Speed Control Row -->
+  <view class="speed-control-row">
+    <view class="speed-control-btn" bindtap="handleDecreaseSpeed">
+      <text class="speed-control-icon">-</text>
+    </view>
+    <view class="speed-display-card">
+      <text class="card-label">{{speedKmhLabel}}</text>
+      <text class="speed-display-value">{{speed}}</text>
+    </view>
+    <view class="speed-control-btn" bindtap="handleIncreaseSpeed">
+      <text class="speed-control-icon">+</text>
+    </view>
   </view>
 
 
@@ -53,7 +61,7 @@
       <!-- Center Text -->
       <view class="gauge-center-cover">
         <text class="gauge-center-value">{{load}}</text>
-        <text class="gauge-center-label">{{loadLabel}}</text>
+        <text class="gauge-center-label">{{inclineLabel}}</text>
       </view>
       <!-- Gauge Knob -->
       <view class="gauge-knob-container" style="transform: rotate({{knobAngle}}deg);">
@@ -62,7 +70,7 @@
     </view>
     <view class="gauge-labels">
       <text>0</text>
-      <text>32</text>
+      <text>15</text>
     </view>
   </view>
 

@@ -5,38 +5,46 @@ const I18n = global.I18n || I18nUtil;
 
 Page({
   data: {
-    userName: 'lucy',
-    date: '2025/12/06',
+    userName: 'Dkkd',
+    date: '',
     caloriesBurned: 128,
-    duration: '18:24',
-    rpm: '61',
+    duration: '00:01:36',
+    hrBpm: 60,
     avgSpeed: '1.3',
-    watt: '152',
-    distance: '2.37',
+    incline: 91,
+    distance: '0.7',
     // 国际化文本（初始化为空，在 onLoad 中根据系统语言设置）
     pageTitle: '',
     kcalUnit: '',
-    burnCaloriesLabel: '',
-    totalDurationLabel: '',
-    rpmLabel: '',
+    caloriesLabel: '',
+    workoutTimeLabel: '',
+    hrBpmLabel: '',
     speedLabel: '',
-    powerLabel: '',
+    inclineLabel: '',
     distanceLabel: ''
   },
   onLoad(options) {
     // 确保 I18n 已初始化（如果全局未定义，使用工具类实例）
     const currentI18n = global.I18n || I18nUtil;
     
+    // 获取当天日期
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}/${month}/${day}`;
+    
     // 根据系统语言初始化国际化文本
     this.setData({
       pageTitle: currentI18n.t('congratulations'),
       kcalUnit: currentI18n.t('kcal'),
-      burnCaloriesLabel: currentI18n.t('burn_calories'),
-      totalDurationLabel: currentI18n.t('total_duration'),
-      rpmLabel: currentI18n.t('rpm'),
+      caloriesLabel: currentI18n.t('calories'),
+      workoutTimeLabel: currentI18n.t('workout_time'),
+      hrBpmLabel: currentI18n.t('hr_bpm'),
       speedLabel: currentI18n.t('speed_kmh_label'),
-      powerLabel: currentI18n.t('power_w_label'),
-      distanceLabel: currentI18n.t('distance_km_label')
+      inclineLabel: currentI18n.t('incline'),
+      distanceLabel: currentI18n.t('distance_km_label'),
+      date: todayStr
     });
     ty.hideMenuButton({ success: () => {
       console.log('hideMenuButton success');
@@ -84,12 +92,12 @@ Page({
       // 格式化数据
       const durationFormatted = exerciseData.durationFormatted || formatTime(exerciseData.duration);
       const caloriesBurned = Math.round(exerciseData.calories);
-      const rpm = exerciseData.rpm ? exerciseData.rpm : '0';
-      const distance = exerciseData.distance ? exerciseData.distance.toFixed(2) : '0.00';
+      const hrBpm = exerciseData.hrBpm || exerciseData.rpm || 60;
+      const distance = exerciseData.distance ? exerciseData.distance.toFixed(2) : '0.7';
       
       // 优先使用传递的speed值，如果没有则使用speedKmh，最后才计算平均速度
       const durationInHours = exerciseData.duration > 0 ? exerciseData.duration / 3600 : 0;
-      let avgSpeed = '0.0';
+      let avgSpeed = '1.3';
       if (exerciseData.speed && exerciseData.speed > 0) {
         // 优先使用传递的speed值（与exercise页面显示的值一致）
         avgSpeed = parseFloat(exerciseData.speed).toFixed(1);
@@ -101,17 +109,17 @@ Page({
         avgSpeed = (parseFloat(distance) / durationInHours).toFixed(1);
       }
       
-      const watt = exerciseData.watt ? exerciseData.watt: '00';
-      const date = exerciseData.dateCongrats || exerciseData.dateFormatted || '2025/09/12';
+      const incline = exerciseData.incline || 91;
+      const date = exerciseData.dateCongrats || exerciseData.dateFormatted || todayStr;
       
       this.setData({
         userName: userName,
         date: date,
         caloriesBurned: caloriesBurned,
         duration: durationFormatted,
-        rpm: rpm,
+        hrBpm: hrBpm,
         avgSpeed: avgSpeed,
-        watt: watt,
+        incline: incline,
         distance: distance
       });
     }
