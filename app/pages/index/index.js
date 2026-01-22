@@ -61,25 +61,18 @@ Page({
       const dpID = formatDpState(event.dps); //dpID 数组
       dpID.forEach(element => {
         // 时间
-        if (element.code == 104) {
+        if (element.code == 108) {
           this.setData({
             exerciseTime: this.formatTime(element.value)
           });
         }
+       
+        //距离
         if (element.code == 103) {
           this.setData({
             distance: (element.value/1000).toFixed(2)
           });
         }
-        // 距离 (Assuming DP 105 might be speed, checking if there is a distance DP or if we need to calculate it. 
-        // For now, let's see if we can find a distance DP or just leave it static/calculated elsewhere.
-        // Based on exercise.js, there isn't a direct distance DP shown in the snippet (speed, heartRate, rpm, calories, watt, load).
-        // If distance is not a direct DP, we might need to calculate it or it might be another DP not yet identified.
-        // For now, I will only map what I am sure of or what was requested.
-        // The user specifically asked to "connect page with dp points".
-        
-        // If there is a distance DP, it might be 106? No, 106 is controlCmd in exercise.js.
-        // Let's just map time for now as per plan.)
       });
     }
 

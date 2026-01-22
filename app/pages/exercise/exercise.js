@@ -198,8 +198,8 @@ dpID.forEach(element => {
     }
     return;
   }
-  //speed
-  if(element.code == 105) {
+  //速度
+  if(element.code == 112) {
     this.setData({
       speed: (element.value/1000).toFixed(1)
     });
@@ -211,7 +211,7 @@ dpID.forEach(element => {
     });
   }
   // 时间
-  if(element.code == 104) {
+  if(element.code == 108) {
     if (this.data.isGoalMode && this.data.goalType === 'time') {
       // 目标模式下的时间目标：使用倒计时，不直接使用硬件上报的时间
       // 但可以用于记录实际运动时间
@@ -225,7 +225,7 @@ dpID.forEach(element => {
     }
   }
   //心率
-  if(element.code == 108) {
+  if(element.code == 110) {
     this.setData({
       heartRate: element.value
     });
@@ -253,7 +253,7 @@ dpID.forEach(element => {
     }
   }
  // 卡路里
- if(element.code == 107) {
+ if(element.code == 105) {
   console.log('卡路里:', element.value);
   const rawCalories = element.value / 1000;
   if (this.data.isGoalMode) {
@@ -299,6 +299,14 @@ if(element.code == 102) {
   });
 }
 });
+}
+
+//扬升
+if(element.code == 114) {
+  console.log('扬升:', element.value);
+  this.setData({
+    incline: element.value
+  });
 }
 
 registerDeviceListListener({
