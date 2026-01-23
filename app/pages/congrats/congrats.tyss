@@ -30,7 +30,7 @@
   z-index: 2;
   display: flex;
   flex-direction: column;
-  padding: 0 30rpx 200rpx;
+  padding: 24px 30rpx 200rpx;
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;

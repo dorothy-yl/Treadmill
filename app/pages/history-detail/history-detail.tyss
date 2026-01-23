@@ -152,6 +152,11 @@
   gap: 24rpx;
 }
 
+.middle-cards-row .info-card {
+  flex: 1;
+  height: 340rpx;
+}
+
 .info-card {
   background-color: rgba(255, 255, 255, 0.1);
   border-radius: 40rpx;

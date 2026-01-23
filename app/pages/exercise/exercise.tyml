@@ -39,14 +39,14 @@
   <!-- Speed Control Row -->
   <view class="speed-control-row">
     <view class="speed-control-btn" bindtap="handleDecreaseSpeed">
-      <text class="speed-control-icon">-</text>
+      <text class="speed-control-icon {{isDecreaseSpeedPressed ? 'speed-control-icon-pressed' : ''}}">-</text>
     </view>
     <view class="speed-display-card">
       <text class="card-label">{{speedKmhLabel}}</text>
       <text class="speed-display-value">{{speed}}</text>
     </view>
     <view class="speed-control-btn" bindtap="handleIncreaseSpeed">
-      <text class="speed-control-icon">+</text>
+      <text class="speed-control-icon {{isIncreaseSpeedPressed ? 'speed-control-icon-pressed' : ''}}">+</text>
     </view>
   </view>
 
@@ -70,7 +70,7 @@
     </view>
     <view class="gauge-labels">
       <text>0</text>
-      <text>15</text>
+      <text>100</text>
     </view>
   </view>
 

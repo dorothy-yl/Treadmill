@@ -20,13 +20,11 @@ Page({
     detailsLabel: '',
     quickStartLabel: '',
     hrBpmLabel: '',
-    rpmLabel: '',
-    powerWLabel: '',
+    inclineLabel: '',
+    distanceKmLabel: '',
     speedKmhLabel: '',
     caloriesLabel: '',
-    distanceLabel: '',
-    maxResistanceLabel: '',
-    trainingDurationLabel: ''
+    workoutTimeLabel: ''
   },
 
   // 格式化时长为 "HH:MM:SS" 格式
@@ -98,10 +96,9 @@ Page({
       title: titleValue,
       Load: loadValue,
       calories: caloriesValue.toString(),
-      distance: distanceValue.toFixed(2),
+      distance: distanceValue.toFixed(1),
       speed: speedValue,
-      rpm: logData.rpm ? logData.rpm.toString() : '0',
-      watt: logData.watt ? logData.watt.toString() : '0.0',
+      incline: logData.incline ? logData.incline.toString() : (logData.avgResistance ? Math.round(logData.avgResistance).toString() : '0'),
       maxResistance: logData.maxResistance ? logData.maxResistance.toString() : '0',
       minResistance: logData.minResistance ? logData.minResistance.toString() : '0',
       heartRate: logData.heartRate ? logData.heartRate.toString() : '0',
@@ -111,25 +108,28 @@ Page({
     };
   },
 
-  // 格式化日期为 "12月29日 16:53:07" 格式 (中文) 或 "Dec 29 16:53:07" 格式 (英文)
+  // 格式化日期为 "12月11日12:01:03" 格式 (中文) 或 "2025.10.05 12:01:03" 格式 (英文)
   formatDate(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const seconds = date.getSeconds().toString().padStart(2, '0');
     const monthKeys = [
       'month_january_short', 'month_february_short', 'month_march_short', 'month_april_short',
       'month_may_short', 'month_june_short', 'month_july_short', 'month_august_short',
       'month_september_short', 'month_october_short', 'month_november_short', 'month_december_short'
     ];
-    const month = date.getMonth();
-    const day = date.getDate();
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const seconds = date.getSeconds().toString().padStart(2, '0');
-    const monthText = this.getI18n().t(monthKeys[month]);
+    const monthText = this.getI18n().t(monthKeys[date.getMonth()]);
     // 检查翻译后的文本是否包含"月"字来判断是否为中文
     const isChinese = monthText.includes('月');
     if (isChinese) {
-      return `${monthText}${day}日 ${hours}:${minutes}:${seconds}`;
+      return `${monthText}${day}日${hours}:${minutes}:${seconds}`;
     } else {
-      return `${monthText} ${day} ${hours}:${minutes}:${seconds}`;
+      const monthStr = month.toString().padStart(2, '0');
+      const dayStr = day.toString().padStart(2, '0');
+      return `${year}.${monthStr}.${dayStr} ${hours}:${minutes}:${seconds}`;
     }
   },
 
@@ -325,14 +325,13 @@ Page({
         date: formattedDate,
         title: titleValue,
         Load: options.Load || '18',
-        calories: options.calories || '52',
-        distance: distance.toFixed(2),
+        calories: options.calories || '80',
+        distance: distance.toFixed(1),
         speed: speedValue,
-        rpm: options.rpm || '52',
-        watt: options.watt || '50.1',
+        incline: options.incline || (options.Load || '52'),
         maxResistance: options.maxResistance || '19',
         minResistance: options.minResistance || '1.3',
-        heartRate: options.heartRate || '60',
+        heartRate: options.heartRate || '2',
         isGoalMode: isGoalMode,
         pageTitle: titleValue
       };
@@ -340,6 +339,10 @@ Page({
       // 确保距离格式正确
       if (record.distance && typeof record.distance === 'number') {
         record.distance = record.distance.toFixed(1);
+      }
+      // 设置 incline 字段
+      if (!record.incline) {
+        record.incline = record.avgResistance ? Math.round(record.avgResistance).toString() : (record.Load ? record.Load.toString() : '0');
       }
       // 格式化时长（duration 是秒数）
       if (record.duration !== undefined) {
@@ -446,13 +449,11 @@ Page({
       detailsLabel: currentI18n.t('details'),
       quickStartLabel: currentI18n.t('quick_start'),
       hrBpmLabel: currentI18n.t('hr_bpm'),
-      rpmLabel: currentI18n.t('rpm'),
-      powerWLabel: currentI18n.t('power_w'),
+      inclineLabel: currentI18n.t('incline'),
+      distanceKmLabel: currentI18n.t('distance_km_simple'),
       speedKmhLabel: currentI18n.t('speed_kmh'),
       caloriesLabel: currentI18n.t('calories'),
-      distanceLabel: currentI18n.t('distance'),
-      maxResistanceLabel: currentI18n.t('max_resistance'),
-      trainingDurationLabel: currentI18n.t('training_duration')
+      workoutTimeLabel: currentI18n.t('workout_time')
     });
     
     ty.hideMenuButton({ success: () => {
@@ -477,6 +478,10 @@ Page({
           } else if (options.speedKmh !== undefined && options.speedKmh !== null && options.speedKmh !== '') {
             cloudRecord.speed = parseFloat(options.speedKmh).toFixed(1);
           }
+          // 优先使用URL参数中的incline值
+          if (options.incline !== undefined && options.incline !== null && options.incline !== '') {
+            cloudRecord.incline = options.incline;
+          }
           
           this.setData({
             record: cloudRecord
@@ -493,6 +498,10 @@ Page({
             record.speed = parseFloat(options.speed).toFixed(1);
           } else if (options.speedKmh !== undefined && options.speedKmh !== null && options.speedKmh !== '') {
             record.speed = parseFloat(options.speedKmh).toFixed(1);
+          }
+          // 优先使用URL参数中的incline值
+          if (options.incline !== undefined && options.incline !== null && options.incline !== '') {
+            record.incline = options.incline;
           }
           
           this.setData({
@@ -512,6 +521,10 @@ Page({
         record.speed = parseFloat(options.speed).toFixed(1);
       } else if (options.speedKmh !== undefined && options.speedKmh !== null && options.speedKmh !== '') {
         record.speed = parseFloat(options.speedKmh).toFixed(1);
+      }
+      // 优先使用URL参数中的incline值
+      if (options.incline !== undefined && options.incline !== null && options.incline !== '') {
+        record.incline = options.incline;
       }
       
       this.setData({

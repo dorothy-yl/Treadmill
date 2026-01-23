@@ -24,10 +24,11 @@ Page({
     isRefreshing: false, // 下拉刷新状态
     // 国际化文本（初始化为空，在 onLoad 中根据系统语言设置）
     sportsRecordsLabel: '',
+    workoutRecordsLabel: '',
     noRecordsTodayLabel: '',
     hrBpmLabel: '',
-    rpmLabel: '',
-    powerWLabel: ''
+    inclineLabel: '',
+    distanceKmLabel: ''
   },
 
   /**
@@ -69,10 +70,11 @@ Page({
       ],
       // 初始化国际化文本
       sportsRecordsLabel: currentI18n.t('sports_records'),
+      workoutRecordsLabel: currentI18n.t('workout_records'),
       noRecordsTodayLabel: currentI18n.t('no_records_today'),
       hrBpmLabel: currentI18n.t('hr_bpm'),
-      rpmLabel: currentI18n.t('rpm'),
-      powerWLabel: currentI18n.t('power_w')
+      inclineLabel: currentI18n.t('incline'),
+      distanceKmLabel: currentI18n.t('distance_km_simple')
     });
     this.updateDateDisplay(today);
     this.generateCalendar();
@@ -227,25 +229,28 @@ Page({
     }
   },
 
-  // 格式化日期时间为 "12月29日 16:53:07" 格式 (中文) 或 "Dec 29 16:53:07" 格式 (英文)
+  // 格式化日期时间为 "12月11日12:01:03" 格式 (中文) 或 "2025.10.05 12:01:03" 格式 (英文)
   formatDateTime(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const seconds = date.getSeconds().toString().padStart(2, '0');
     const monthKeys = [
       'month_january_short', 'month_february_short', 'month_march_short', 'month_april_short',
       'month_may_short', 'month_june_short', 'month_july_short', 'month_august_short',
       'month_september_short', 'month_october_short', 'month_november_short', 'month_december_short'
     ];
-    const month = date.getMonth();
-    const day = date.getDate();
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const seconds = date.getSeconds().toString().padStart(2, '0');
-    const monthText = this.getI18n().t(monthKeys[month]);
+    const monthText = this.getI18n().t(monthKeys[date.getMonth()]);
     // 检查翻译后的文本是否包含"月"字来判断是否为中文
     const isChinese = monthText.includes('月');
     if (isChinese) {
-      return `${monthText}${day}日 ${hours}:${minutes}:${seconds}`;
+      return `${monthText}${day}日${hours}:${minutes}:${seconds}`;
     } else {
-      return `${monthText} ${day} ${hours}:${minutes}:${seconds}`;
+      const monthStr = month.toString().padStart(2, '0');
+      const dayStr = day.toString().padStart(2, '0');
+      return `${year}.${monthStr}.${dayStr} ${hours}:${minutes}:${seconds}`;
     }
   },
 
@@ -594,13 +599,12 @@ Page({
           title: title, // 添加标题字段
           speed: record.speedKmh ? record.speedKmh.toFixed(2) : (record.speed ? record.speed.toFixed(2) : '0.00'),
           calories: Math.round(record.calories || 0).toString(),
-          distance: record.distance ? record.distance.toFixed(2) : '0.0',
+          distance: record.distance ? record.distance.toFixed(1) : '0.0',
           Load: record.load ? record.load.toString() : (record.avgResistance ? Math.round(record.avgResistance).toString() : '0'),
           resistance: record.avgResistance ? record.avgResistance.toFixed(1) : (record.maxResistance ? record.maxResistance.toFixed(1) : '0.0'),
           // 添加三个数据显示字段
           heartRate: record.heartRate ? Math.round(record.heartRate).toString() : '0',
-          rpm: record.rpm ? Math.round(record.rpm).toString() : '0',
-          watt: record.watt ? Math.round(record.watt).toString() : '0',
+          incline: record.incline ? Math.round(record.incline).toString() : (record.avgResistance ? Math.round(record.avgResistance).toString() : '0'),
           // 保存完整数据用于详情页
           fullRecord: record
         };
@@ -664,13 +668,12 @@ Page({
           title: title,
           speed: record.speedKmh ? record.speedKmh.toFixed(2) : (record.speed ? record.speed.toFixed(2) : '0.00'),
           calories: Math.round(record.calories).toString(),
-          distance: record.distance ? record.distance.toFixed(2) : '0.0',
+          distance: record.distance ? record.distance.toFixed(1) : '0.0',
           Load: record.load ? record.load.toString() : (record.avgResistance ? Math.round(record.avgResistance).toString() : '0'),
           resistance: record.avgResistance ? record.avgResistance.toFixed(1) : (record.maxResistance ? record.maxResistance.toFixed(1) : '0.0'),
           // 添加三个数据显示字段
           heartRate: record.heartRate ? Math.round(record.heartRate).toString() : '0',
-          rpm: record.rpm ? Math.round(record.rpm).toString() : '0',
-          watt: record.watt ? Math.round(record.watt).toString() : '0',
+          incline: record.incline ? Math.round(record.incline).toString() : (record.avgResistance ? Math.round(record.avgResistance).toString() : '0'),
           pageTitle: record.pageTitle || (record.isGoalMode ? this.getI18n().t('target_pattern') : this.getI18n().t('quick_start')),
           isGoalMode: record.isGoalMode,
           // 保存完整数据用于详情页
@@ -892,9 +895,8 @@ Page({
         date: fullRecord.dateFormatted || fullRecord.date || '',
         speed: fullRecord.speedKmh ? fullRecord.speedKmh.toString() : (fullRecord.speed ? fullRecord.speed.toString() : '0'),
         calories: fullRecord.calories ? fullRecord.calories.toString() : '0',
-        distance: fullRecord.distance ? fullRecord.distance.toFixed(2) : '0.00',
-        rpm: fullRecord.rpm ? fullRecord.rpm.toString() : '0',
-        watt: fullRecord.watt ? fullRecord.watt.toString() : '0',
+        distance: fullRecord.distance ? fullRecord.distance.toFixed(1) : '0.0',
+        incline: fullRecord.incline ? fullRecord.incline.toString() : (fullRecord.avgResistance ? Math.round(fullRecord.avgResistance).toString() : '0'),
         Load: fullRecord.load ? fullRecord.load.toString() : (fullRecord.avgResistance ? Math.round(fullRecord.avgResistance).toString() : '0'),
         maxResistance: fullRecord.maxResistance ? fullRecord.maxResistance.toString() : '0',
         minResistance: fullRecord.minResistance ? fullRecord.minResistance.toString() : '0',

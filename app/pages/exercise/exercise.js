@@ -36,6 +36,12 @@ Page({
     initialDistance: 0,
     initialCalories: 0,
     goalCompleted: false, // 目标是否已完成
+    // 速度限制（从dp点获取）
+    maxSpeed: 999999, // 默认值，将从dp点115获取
+    minSpeed: 0, // 默认值，将从dp点116获取
+    // 扬升限制（从dp点获取）
+    maxAscension: 100, // 默认值，将从dp点117获取
+    minAscension: 0, // 默认值，将从dp点118获取
     // 国际化文本（初始化为空，在 onLoad 中根据系统语言设置）
     speedKmhLabel: '',
     caloriesKcalLabel: '',
@@ -46,7 +52,10 @@ Page({
     distanceKmLabel: '',
     loadLabel: '',
     inclineLabel: '',
-    startHoldStopLabel: ''
+    startHoldStopLabel: '',
+    // 按钮点击状态
+    isDecreaseSpeedPressed: false,
+    isIncreaseSpeedPressed: false
   },
   timer: null,
   tempLoad: null, // 临时存储滑动过程中的load值
@@ -204,13 +213,8 @@ dpID.forEach(element => {
       speed: (element.value/1000).toFixed(1)
     });
   }
-  //rpm
-  if(element.code == 110) {
-    this.setData({
-      rpm: element.value
-    });
-  }
-  // 时间
+
+  // 时间 - DP 108 (Workout Time)
   if(element.code == 108) {
     if (this.data.isGoalMode && this.data.goalType === 'time') {
       // 目标模式下的时间目标：使用倒计时，不直接使用硬件上报的时间
@@ -224,13 +228,13 @@ dpID.forEach(element => {
       });
     }
   }
-  //心率
+  //心率 - DP 110
   if(element.code == 110) {
     this.setData({
       heartRate: element.value
     });
   }
-  // 距离
+  // 距离 - DP 103 (里程)
   if (element.code == 103) {
     const rawDistance = element.value / 1000;
     if (this.data.isGoalMode) {
@@ -252,7 +256,7 @@ dpID.forEach(element => {
       });
     }
   }
- // 卡路里
+ // 卡路里 - DP 105
  if(element.code == 105) {
   console.log('卡路里:', element.value);
   const rawCalories = element.value / 1000;
@@ -275,38 +279,55 @@ dpID.forEach(element => {
     });
   }
 }
-  //功率
-  if(element.code == 109) {
-    console.log('功率:', element.value);
+  //阻力 - DP 107
+  if(element.code == 107) {
+    console.log('阻力:', element.value);
+    const loadValue = element.value;
     this.setData({
-      watt: element.value
+      load: loadValue
     });
   }
-  // 最大阻力
-  if(element.code == 111) {
-    console.log('设备上报最大阻力:', element.value);
+  // 最大速度限制 (dp点115)
+  if(element.code == 115) {
+    console.log('最大速度限制:', element.value);
     this.setData({
-      dpMaxResistance: element.value
+      maxSpeed: element.value
     });
   }
-
-  //阻力
-if(element.code == 102) {
-  console.log('阻力:', element.value);
-  const loadValue = element.value;
-  this.setData({
-    load: loadValue
-  });
-}
+  // 最小速度限制 (dp点116)
+  if(element.code == 116) {
+    console.log('最小速度限制:', element.value);
+    this.setData({
+      minSpeed: element.value
+    });
+  }
+  // 最大扬升限制 (dp点117)
+  if(element.code == 117) {
+    console.log('最大扬升限制:', element.value);
+    this.setData({
+      maxAscension: element.value
+    });
+  }
+  // 最小扬升限制 (dp点118)
+  if(element.code == 118) {
+    console.log('最小扬升限制:', element.value);
+    this.setData({
+      minAscension: element.value
+    });
+  }
+  //扬升 - DP 114
+  if(element.code == 114) {
+    console.log('扬升:', element.value);
+    this.setData({
+      incline: element.value
+    });
+  }
+  //历史记录 - DP 113
+  if(element.code == 113) {
+    console.log('历史记录:', element.value);
+    // 如果需要处理历史记录数据，可以在这里添加逻辑
+  }
 });
-}
-
-//扬升
-if(element.code == 114) {
-  console.log('扬升:', element.value);
-  this.setData({
-    incline: element.value
-  });
 }
 
 registerDeviceListListener({
@@ -414,7 +435,7 @@ onDpDataChange(_onDpDataChange);
     if (deviceId) {
       ty.device.publishDps({
         deviceId,
-        dps: { 102: currentLoad },
+        dps: { 107: currentLoad },
         mode: 1,
         pipelines: [0, 1, 2, 3, 4, 5, 6],
         success: () => {
@@ -517,7 +538,7 @@ onDpDataChange(_onDpDataChange);
       // 先设置阻力，确保硬件开始上报RPM和Watt
       ty.device.publishDps({
         deviceId,
-        dps: { 102: currentLoad },
+        dps: { 107: currentLoad },
         mode: 1,
         pipelines: [0, 1, 2, 3, 4, 5, 6],
         success: () => {
@@ -924,10 +945,13 @@ throttle(func, delay) {
 
   // 仅更新视觉位置（不更新load数据和发送命令）
   updateGaugeVisual(value) {
-    const maxLoad = 15; // 改为坡度范围 0-15
-    const currentValue = Math.min(Math.max(value, 0), maxLoad);
+    // 使用从dp点获取的最大/最小扬升限制
+    const maxAscension = this.data.maxAscension || 100;
+    const minAscension = this.data.minAscension || 0;
+    // 应用最小和最大扬升限制
+    const currentValue = Math.min(Math.max(value, minAscension), maxAscension);
     const maxAngle = 270;
-    const progressAngle = (currentValue / maxLoad) * maxAngle;
+    const progressAngle = (currentValue / maxAscension) * maxAngle;
     const startAngle = 220;
     const knobAngle = startAngle + progressAngle;
 
@@ -960,8 +984,13 @@ throttle(func, delay) {
     if (adjustedAngle > endAngle) adjustedAngle = endAngle;
   
     const progress = (adjustedAngle - startAngle) / maxSweep;
-    const maxLoad = 15; // 改为坡度范围 0-15
-    const newLoad = Math.min(Math.floor(progress * maxLoad), maxLoad);
+    // 使用从dp点获取的最大/最小扬升限制
+    const maxAscension = this.data.maxAscension || 100;
+    const minAscension = this.data.minAscension || 0;
+    const maxLoad = maxAscension; // 使用最大扬升作为上限
+    const rawLoad = Math.floor(progress * maxLoad);
+    // 应用最小和最大扬升限制
+    const newLoad = Math.min(Math.max(rawLoad, minAscension), maxAscension);
   
     this.tempLoad = newLoad;
   
@@ -990,7 +1019,7 @@ throttle(func, delay) {
       if (deviceId) {
         ty.device.publishDps({
           deviceId,
-          dps: { 102: finalLoad },
+          dps: { 107: finalLoad },
           mode: 1,
           pipelines: [0, 1, 2, 3, 4, 5, 6],
           success: () => {
@@ -1014,11 +1043,26 @@ throttle(func, delay) {
 
   // 处理速度增加
   handleIncreaseSpeed() {
+    // 设置按钮点击状态
+    this.setData({
+      isIncreaseSpeedPressed: true
+    });
+    
     const currentSpeed = parseFloat(this.data.speed) || 0;
-    const newSpeed = Math.min(currentSpeed + 0.1, 99.9); // 限制最大速度为 99.9
+    const maxSpeed = this.data.maxSpeed || 999999;
+    // 应用最大速度限制（从dp点115获取）
+    const newSpeed = Math.min(currentSpeed + 0.1, maxSpeed);
     this.setData({
       speed: newSpeed.toFixed(1)
     });
+    
+    // 200ms后恢复按钮颜色
+    setTimeout(() => {
+      this.setData({
+        isIncreaseSpeedPressed: false
+      });
+    }, 200);
+    
     // 如果需要同步到硬件，可以在这里添加设备命令
     const { query: { deviceId } } = ty.getLaunchOptionsSync();
     if (deviceId) {
@@ -1034,11 +1078,26 @@ throttle(func, delay) {
 
   // 处理速度减少
   handleDecreaseSpeed() {
+    // 设置按钮点击状态
+    this.setData({
+      isDecreaseSpeedPressed: true
+    });
+    
     const currentSpeed = parseFloat(this.data.speed) || 0;
-    const newSpeed = Math.max(currentSpeed - 0.1, 0); // 限制最小速度为 0
+    const minSpeed = this.data.minSpeed || 0;
+    // 应用最小速度限制（从dp点116获取）
+    const newSpeed = Math.max(currentSpeed - 0.1, minSpeed);
     this.setData({
       speed: newSpeed.toFixed(1)
     });
+    
+    // 200ms后恢复按钮颜色
+    setTimeout(() => {
+      this.setData({
+        isDecreaseSpeedPressed: false
+      });
+    }, 200);
+    
     // 如果需要同步到硬件，可以在这里添加设备命令
     const { query: { deviceId } } = ty.getLaunchOptionsSync();
     if (deviceId) {
@@ -1053,10 +1112,13 @@ throttle(func, delay) {
   },
 
   updateGauge(value) {
-    const maxLoad = 15; // 改为坡度范围 0-15
-    const currentValue = Math.min(Math.max(value, 0), maxLoad); // Ensure bounds
+    // 使用从dp点获取的最大/最小扬升限制
+    const maxAscension = this.data.maxAscension || 100;
+    const minAscension = this.data.minAscension || 0;
+    // 应用最小和最大扬升限制
+    const currentValue = Math.min(Math.max(value, minAscension), maxAscension);
     const maxAngle = 270;
-    const progressAngle = (currentValue / maxLoad) * maxAngle;
+    const progressAngle = (currentValue / maxAscension) * maxAngle;
     const startAngle = 220;
     const knobAngle = startAngle + progressAngle;
 

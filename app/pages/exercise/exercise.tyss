@@ -152,16 +152,19 @@
   border-radius: 50%;
   background-color: #2B3240;
   display: flex;
-  align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
 .speed-control-icon {
-  font-size: 48rpx;
-  font-weight: bold;
+  font-size: 84rpx;
   color: #FFFFFF;
   line-height: 1;
+  transition: color 0.2s ease;
+}
+
+.speed-control-icon-pressed {
+  color: #A2E525;
 }
 
 .speed-display-card {

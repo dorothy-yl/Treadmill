@@ -115,15 +115,15 @@
 /* 右侧背景圆圈区域 */
 .summary-right {
   position: absolute; /* 绝对定位，实现偏右效果 */
-  right: 0rpx; /* 像图二一样向右偏移 */
-  top: 50%;
+  right: 24rpx; /* 像图二一样向右偏移 */
+  top: 56%;
   transform: translateY(-50%);
   z-index: 1;
 }
 
 .bicycle-circle-outer {
-  width: 450rpx;
-  height: 450rpx;
+  width: 424rpx;
+  height: 424rpx;
   background: rgba(255, 255, 255, 0.05); /* 淡淡的背景色 */
   border-radius: 50%;
   display: flex;
@@ -132,8 +132,8 @@
 }
 
 .bicycle-circle-inner {
-  width: 360rpx;
-  height: 360rpx;
+  width: 320rpx;
+  height: 320rpx;
   background: rgb(255, 255, 255);
   border-radius: 50%;
   display: flex;
@@ -142,8 +142,8 @@
 }
 
 .bicycle-image {
-  width: 400rpx; /* 跑步机图片可以稍微超出内圆 */
-  height: 400rpx;
+  width: 450rpx; /* 跑步机图片可以稍微超出内圆 */
+  height: 500rpx;
   z-index: 3;
 }
 
@@ -265,4 +265,3 @@
   font-size: 28rpx;
   font-family: monospace; /* Matches screenshot somewhat */
 }
-

@@ -1,6 +1,6 @@
 <view class="container">
   <view class="header">
-    <text class="page-title">{{sportsRecordsLabel}}</text>
+    <text class="page-title">{{workoutRecordsLabel}}</text>
   </view>
   <view class="date-selector">
     <view class="arrow-btn left" bindtap="prevDate">
@@ -37,13 +37,13 @@
         </view>
         <view class="stat-divider"></view>
         <view class="stat-item">
-          <text class="stat-label">{{rpmLabel}}</text>
-          <text class="stat-val">{{item.rpm}}</text>
+          <text class="stat-label">{{inclineLabel}}</text>
+          <text class="stat-val">{{item.incline}}</text>
         </view>
         <view class="stat-divider"></view>
         <view class="stat-item">
-          <text class="stat-label">{{powerWLabel}}</text>
-          <text class="stat-val">{{item.watt}}</text>
+          <text class="stat-label">{{distanceKmLabel}}</text>
+          <text class="stat-val">{{item.distance}}</text>
         </view>
       </view>
     </view>
