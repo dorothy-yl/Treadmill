@@ -9,7 +9,7 @@ const strings = require('../i18n/strings.json');
 // I18n 类
 class I18n {
   constructor() {
-    this.currentLang = 'zh'; // 默认语言为中文
+    this.currentLang = 'en'; // 默认语言为英文
     this.strings = strings;
   }
 
@@ -22,12 +22,12 @@ class I18n {
     // 标准化语言标识（兼容 zh/zh-CN 和 en/en-US 等格式）
     const normalizedLang = this.normalizeLanguage(systemLang);
     
-    // 检查语言包是否存在，不存在则使用默认语言（zh）
+    // 检查语言包是否存在，不存在则使用默认语言（en）
     if (this.strings[normalizedLang]) {
       this.currentLang = normalizedLang;
       console.log(`I18n initialized with language: ${normalizedLang}`);
     } else {
-      console.warn(`Language pack for "${normalizedLang}" not found, using default: zh`);
+      console.warn(`Language pack for "${normalizedLang}" not found, using default: en`);
       this.currentLang = 'zh';
     }
   }
@@ -41,7 +41,7 @@ class I18n {
    */
   normalizeLanguage(lang) {
     if (!lang || typeof lang !== 'string') {
-      return 'zh'; // 默认返回中文
+      return 'en'; // 默认返回英文
     }
 
     const lowerLang = lang.toLowerCase().trim();
@@ -56,9 +56,9 @@ class I18n {
       return 'en';
     }
     
-    // 其他语言暂不支持，返回默认中文
-    console.warn(`Unsupported language: ${lang}, using default: zh`);
-    return 'zh';
+    // 其他语言暂不支持，返回默认英文
+    console.warn(`Unsupported language: ${lang}, using default: en`);
+    return 'en';
   }
 
   /**

@@ -50,7 +50,7 @@ App({
       }
       
       // 初始化 I18n 实例，传入系统语言
-      // 如果未获取到系统语言，I18n 内部会使用默认语言（zh）
+      // 如果未获取到系统语言，I18n 内部会使用默认语言（en）
       I18n.init(systemLang);
       
       // 将 I18n 实例挂载到全局，方便页面直接使用
@@ -60,7 +60,7 @@ App({
     } catch (error) {
       console.error('Failed to initialize I18n:', error);
       // 即使初始化失败，也使用默认语言
-      I18n.init('zh');
+      I18n.init('en');
       global.I18n = I18n;
     }
   },
