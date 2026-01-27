@@ -70,12 +70,12 @@
     </view>
     <view class="gauge-labels">
       <text>0</text>
-      <text>100</text>
+      <text>15</text>
     </view>
   </view>
 
   <!-- Bottom Button -->
   <view class="footer">
-    <button class="main-action-btn" bindlongpress="stopExercise" bindtap="togglePause">{{startHoldStopLabel}}</button>
+    <button class="main-action-btn" bindlongpress="handleMainActionLongPress" bindtap="handleMainActionTap">{{startHoldStopLabel}}</button>
   </view>
 </view>

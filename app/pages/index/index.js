@@ -9,8 +9,8 @@ function formatDpState(dpState) {
 
 Page({
   data: {
-    exerciseTime: '05:04',
-    distance: '23',
+    exerciseTime: '05:20',
+    distance: '1.35',
     currentTime: '9:42',
     // 初始化为空字符串，在 onLoad 中根据系统语言设置
     pageTitle: '',

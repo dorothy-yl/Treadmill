@@ -105,7 +105,7 @@ Page({
       if (ty.getAnalyticsLogsPublishLog) {
         ty.getAnalyticsLogsPublishLog({
           devId: this.deviceId,
-          dpIds: '112',
+          dpIds: '113',
           offset: 0,
           limit: 100,
         })
@@ -355,7 +355,7 @@ Page({
     if (ty.getAnalyticsLogsPublishLog) {
       ty.getAnalyticsLogsPublishLog({
         devId: this.deviceId,
-        dpIds: '112',
+        dpIds: '113',
         offset: 0,
         limit: 100, // 可以根据需要调整，最大4000
       })

@@ -12,6 +12,72 @@ try {
   console.warn('无法导入 @tuya/tuya-panel-api，将使用备用方案:', error);
 }
 
+const HISTORY_DP_ID = 113;
+
+function normalizePublishError(error) {
+  if (!error || typeof error !== 'object') {
+    return error;
+  }
+  const normalized = { ...error };
+  const code = error.errorCode || error.code;
+  const inner = error.innerError || error.inner_error || {};
+  if (code === 20028 && (inner.errorCode === '11001' || inner.code === 11001)) {
+    normalized.humanMessage = 'DP下发失败：设备繁忙或数据格式/长度不符合 DP 限制';
+    normalized.isPublishDpsInvalidParam = true;
+  }
+  return normalized;
+}
+
+function getBleConnectedFlag(deviceInfo) {
+  if (!deviceInfo) return undefined;
+  if (deviceInfo.isBleConnected !== undefined) return deviceInfo.isBleConnected;
+  if (deviceInfo.bleConnected !== undefined) return deviceInfo.bleConnected;
+  if (deviceInfo.bluetoothConnected !== undefined) return deviceInfo.bluetoothConnected;
+  if (deviceInfo.btConnected !== undefined) return deviceInfo.btConnected;
+  return undefined;
+}
+
+function isDeviceReadyForPublish(deviceInfo) {
+  if (!deviceInfo) return true;
+  if (deviceInfo.online === false) return false;
+  const bleConnected = getBleConnectedFlag(deviceInfo);
+  if (bleConnected === false) return false;
+  return true;
+}
+
+function utf8ByteLength(str) {
+  if (typeof str !== 'string') return 0;
+  let bytes = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    const code = str.charCodeAt(i);
+    if (code <= 0x7f) {
+      bytes += 1;
+      continue;
+    }
+    if (code <= 0x7ff) {
+      bytes += 2;
+      continue;
+    }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4;
+      i += 1;
+      continue;
+    }
+    bytes += 3;
+  }
+  return bytes;
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeInt(value, fallback = 0) {
+  const n = typeof value === 'number' ? value : parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 /**
  * 格式化时长为 "HH:MM:SS" 格式
  * @param {Number} seconds - 秒数
@@ -89,7 +155,7 @@ function formatHistoryForDp112(historyData) {
       return JSON.stringify([]);
     }
     
-    // 格式化每条记录，只保留必要字段
+    // 格式化每条记录，只保留必要字段（避免触发 DP 字符串长度限制）
     const formattedRecords = [];
     historyArray.forEach((record, index) => {
       try {
@@ -116,59 +182,55 @@ function formatHistoryForDp112(historyData) {
         }
         
         const formattedDuration = formatTime(durationSeconds);
-        // 处理load值：可能是字符串或数字，需要转换为数字
-        let loadValue = 0;
-        if (record.Load !== undefined) {
-          loadValue = typeof record.Load === 'string' ? parseFloat(record.Load) || 0 : (record.Load || 0);
-        } else if (record.load !== undefined) {
-          loadValue = typeof record.load === 'string' ? parseFloat(record.load) || 0 : (record.load || 0);
-        } else if (record.avgResistance !== undefined) {
-          loadValue = typeof record.avgResistance === 'string' ? parseFloat(record.avgResistance) || 0 : (record.avgResistance || 0);
+       
+        const distanceValue = safeNumber(record.distance, 0);
+        const caloriesValue = safeInt(record.calories, 0);
+        const heartRateValue = safeInt(record.heartRate, safeInt(record.hrBpm, 0));
+        const speedKmhValue = safeNumber(record.speedKmh, Number.isFinite(safeNumber(record.speed, NaN)) ? safeNumber(record.speed, 0) : 0);
+        const inclineValue = safeNumber(
+          record.incline !== undefined ? record.incline : (record.Load !== undefined ? record.Load : (record.load !== undefined ? record.load : 0)),
+          0
+        );
+        const avgResistanceValue = safeNumber(record.avgResistance, record.load !== undefined ? safeNumber(record.load, 0) : 0);
+        const maxResistanceValue = safeInt(record.maxResistance, 0);
+        const minResistanceValue = safeInt(record.minResistance, 0);
+
+        let dateMs = null;
+        if (record.date !== undefined && record.date !== null) {
+          const ms = typeof record.date === 'number' ? record.date : Date.parse(record.date);
+          if (Number.isFinite(ms)) dateMs = ms;
         }
-        const distanceValue = parseFloat(record.distance || 0);
-        const caloriesValue = parseInt(record.calories || 0);
-        const rpmValue = parseInt(record.rpm || 0);
-        const wattValue = parseFloat(record.watt || 0);
-        const maxResistanceValue = parseInt(record.maxResistance || 0);
-        const minResistanceValue = parseInt(record.minResistance || 0);
-        const heartRateValue = parseInt(record.heartRate || 0);
-        // 处理速度字段：支持 speed 和 speedKmh
-        const speedValue = parseFloat(record.speed || record.speedKmh || 0);
-        
-        // 生成可读的显示文本，用于设备日志页面显示
-        const displayText = [
-          `运动时间：${formattedDuration}`,
-          `阻力：${loadValue}`,
-          `距离：${distanceValue.toFixed(2)}km`,
-          `卡路里：${caloriesValue}kcal`,
-          `RPM：${rpmValue}`,
-          `功率：${wattValue}W`,
-          `最大阻力：${maxResistanceValue}`,
-          `最小阻力：${minResistanceValue}`,
-          `心率：${heartRateValue}`,
-          `速度：${speedValue}`,
-          `标题：${record.pageTitle}`,
-          `模式：${record.isGoalMode ? '目标模式' : '快速开始'}`
-        ].join(' | ');
-        
+        if (dateMs === null && record.dateFormatted) {
+          const ms = Date.parse(record.dateFormatted);
+          if (Number.isFinite(ms)) dateMs = ms;
+        }
+        if (dateMs === null && record.id) {
+          const ms = typeof record.id === 'number' ? record.id : parseInt(record.id, 10);
+          if (Number.isFinite(ms)) dateMs = ms;
+        }
+        if (dateMs === null) {
+          dateMs = Date.now();
+        }
+
         const formattedRecord = {
           id: record.id || Date.now(),
-          duration: durationSeconds, // 统一使用秒数
-          date: record.date || record.dateFormatted || new Date().toISOString(),
-          distance: distanceValue,
+          duration: durationSeconds,
+          date: dateMs,
+          distance: Number(distanceValue.toFixed(2)),
           calories: caloriesValue,
-          load: loadValue,
-          rpm: rpmValue,
-          watt: wattValue,
-          // 添加模式识别字段
-          isGoalMode: record.isGoalMode === true,
-          pageTitle: record.pageTitle || (record.isGoalMode ? 'Target pattern' : 'Quick Start'),
-          // 添加其他可能需要的字段
           heartRate: heartRateValue,
-          speed: speedValue,
-          maxResistance: maxResistanceValue,
-          minResistance: minResistanceValue,
+          speedKmh: Number(speedKmhValue.toFixed(1)),
+          incline: Number(inclineValue.toFixed(1)),
+          avgResistance: Number(avgResistanceValue.toFixed(1)),
+          isGoalMode: record.isGoalMode === true
         };
+
+        if (maxResistanceValue !== 0) {
+          formattedRecord.maxResistance = maxResistanceValue;
+        }
+        if (minResistanceValue !== 0) {
+          formattedRecord.minResistance = minResistanceValue;
+        }
         
         formattedRecords.push(formattedRecord);
       } catch (error) {
@@ -186,7 +248,8 @@ function formatHistoryForDp112(historyData) {
     // 验证JSON字符串是否有效
     try {
       JSON.parse(jsonString);
-      console.log(`formatHistoryForDp112: 成功格式化 ${formattedRecords.length} 条记录，JSON长度: ${jsonString.length} 字节`);
+      const bytes = utf8ByteLength(jsonString);
+      console.log(`formatHistoryForDp112: 成功格式化 ${formattedRecords.length} 条记录，JSON长度: ${bytes} bytes`);
     } catch (error) {
       console.error('formatHistoryForDp112: 生成的JSON字符串无效:', error);
       return JSON.stringify([]);
@@ -333,28 +396,11 @@ function saveHistoryToCloud(deviceId, historyData) {
     }
 
     try {
-      // 如果传入的是单条记录，需要先获取现有历史记录，然后合并
       let historyArray = [];
       if (Array.isArray(historyData)) {
-        historyArray = historyData;
+        historyArray = historyData.slice(0, 1);
       } else {
-        // 单条记录：从本地存储获取现有记录，将新记录添加到开头
-        try {
-          const existingHistory = ty.getStorageSync('exerciseHistory') || [];
-          if (Array.isArray(existingHistory)) {
-            historyArray = [historyData, ...existingHistory];
-          } else {
-            historyArray = [historyData];
-          }
-        } catch (error) {
-          console.warn('获取本地历史记录失败，仅保存新记录:', error);
-          historyArray = [historyData];
-        }
-      }
-
-      // 限制记录数量，避免数据过大（最多保留最近100条）
-      if (historyArray.length > 100) {
-        historyArray = historyArray.slice(0, 100);
+        historyArray = [historyData];
       }
 
       // 格式化为 JSON 字符串
@@ -375,25 +421,12 @@ function saveHistoryToCloud(deviceId, historyData) {
           reject(new Error('数据格式验证失败'));
           return;
         }
-        console.log('✓ 数据格式验证通过，包含', parsed.length, '条记录');
       } catch (error) {
         console.error('saveHistoryToCloud: JSON格式验证失败:', error);
         reject(new Error('数据格式验证失败: ' + error.message));
         return;
       }
       
-      console.log('=== 准备上报历史记录到云端 ===');
-      console.log('设备ID:', deviceId);
-      console.log('原始记录数量:', historyArray.length);
-      console.log('格式化后数据大小:', dp112Value.length, '字节');
-      console.log('DP点112数据预览 (前200字符):', dp112Value.substring(0, 200) + (dp112Value.length > 200 ? '...' : ''));
-      console.log('完整JSON数据:', dp112Value);
-      console.log('--- 数据格式说明 ---');
-      console.log('1. 数据已格式化为JSON字符串数组');
-      console.log('2. 设备端需要接收此数据并主动上报到云端');
-      console.log('3. 设备端应使用涂鸦SDK的DP上报接口上报此JSON字符串');
-      console.log('4. 上报时DP点112的值应该是字符串类型（JSON字符串）');
-
       // 通过 publishDps 下发到设备，设备需要主动上报到云端
       const { publishDps } = ty.device;
       if (!publishDps) {
@@ -402,33 +435,43 @@ function saveHistoryToCloud(deviceId, historyData) {
         return;
       }
 
-      console.log('开始调用 publishDps，下发DP点112数据到设备...');
-      publishDps({
-        deviceId: deviceId,
-        dps: {
-          112: dp112Value
-        },
-        mode: 2, // 自动选择最佳通道
-        pipelines: [0, 1, 2, 3, 4, 5, 6], // 所有通道
-        success: (res) => {
-          console.log('✓ publishDps 调用成功，数据已下发到设备');
-          console.log('响应数据:', JSON.stringify(res));
-          console.log('--- 重要提示 ---');
-          console.log('1. 数据已成功下发到设备端');
-          console.log('2. 设备端需要监听DP点112的下发事件');
-          console.log('3. 设备端接收到数据后，应主动调用上报接口将数据上报到云端');
-          console.log('4. 请检查设备端固件是否正确实现了上报逻辑');
-          console.log('5. 请在涂鸦开发者平台的设备日志页面查看DP点112的上报记录');
-          resolve(res);
-        },
-        fail: (error) => {
-          console.error('✗ publishDps 调用失败:');
-          console.error('错误详情:', JSON.stringify(error));
-          console.error('错误消息:', error.errorMsg || error.message || error);
-          console.error('错误代码:', error.errorCode || error.code);
-          reject(error);
-        }
-      });
+      const doPublish = () => {
+        publishDps({
+          deviceId: deviceId,
+          dps: {
+            [HISTORY_DP_ID]: dp112Value
+          },
+          mode: 2,
+          pipelines: [1, 0, 3],
+          success: (res) => resolve(res),
+          fail: (error) => {
+            const normalized = normalizePublishError(error);
+            console.error('saveHistoryToCloud: publishDps 失败', {
+              deviceId,
+              dpId: HISTORY_DP_ID,
+              dpValueLength: typeof dp112Value === 'string' ? dp112Value.length : -1,
+              error: normalized
+            });
+            reject(normalized);
+          }
+        });
+      };
+
+      if (ty.device.getDeviceInfo) {
+        ty.device.getDeviceInfo({
+          deviceId,
+          success: (info) => {
+            if (!isDeviceReadyForPublish(info)) {
+              reject({ errorCode: 'PRECHECK_BLOCK', errorMsg: 'device offline or bluetooth disconnected' });
+              return;
+            }
+            doPublish();
+          },
+          fail: () => doPublish()
+        });
+      } else {
+        doPublish();
+      }
     } catch (error) {
       console.error('saveHistoryToCloud error:', error);
       reject(error);
@@ -481,7 +524,7 @@ function getHistoryFromCloud(deviceId, options = {}) {
     commonApi.statApi
       .getLogInSpecifiedTime({
         devId: deviceId,
-        dpIds: '112',
+        dpIds: String(HISTORY_DP_ID),
         offset: offset,
         limit: maxLimit,
         startTime: startTime,
@@ -584,7 +627,7 @@ function getDpReportLog(deviceId, options = {}) {
     commonApi.statApi
       .getDpReportLog({
         devId: deviceId,
-        dpIds: '112',
+        dpIds: String(HISTORY_DP_ID),
         offset: offset,
         limit: maxLimit,
         sortType: sortType
@@ -696,4 +739,3 @@ module.exports = {
   getDpReportLog,
   findHistoryRecordFromCloud
 };
-

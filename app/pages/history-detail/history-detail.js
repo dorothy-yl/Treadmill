@@ -175,7 +175,7 @@ Page({
     if (ty.getAnalyticsLogsPublishLog) {
       ty.getAnalyticsLogsPublishLog({
         devId: deviceId,
-        dpIds: '112',
+        dpIds: '113',
         offset: 0,
         limit: 10,
       })
@@ -560,4 +560,3 @@ Page({
     }
   }
 });
-

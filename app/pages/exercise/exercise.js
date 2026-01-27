@@ -4,17 +4,39 @@ const I18nUtil = require('../../utils/i18n.js');
 const I18n = global.I18n || I18nUtil;
 
 function formatDpState(dpState) {
-    return Object.keys(dpState).map(dpCode => ({ code: dpCode, value: dpState[dpCode] }));
+    return Object.keys(dpState).map(dpCode => ({ code: Number(dpCode), value: dpState[dpCode] }));
 }
 
 // 导入云端同步工具
 const { formatHistoryForDp112, saveHistoryToCloud } = require('../../utils/cloudSync.js');
 
+const DP = {
+  sportState: 106, // 运动状态（枚举）
+  speed: 112,
+  distance: 103,
+  calories: 105,
+  workoutTime: 108,
+  heartRate: 110,
+  resistance: 107, // 阻力
+  incline: 114 // 扬升/坡度
+};
+
+const SPORT_STATE_DP_VALUE_NUMBER = {
+  START: 0,
+  PAUSE: 1,
+  STOP: 2
+};
+
+const SPORT_STATE_DP_VALUE_STRING = {
+  START: 'Start',
+  PAUSE: 'Pause',
+  STOP: 'Stop'
+};
+
 Page({
   data: {
     isPaused: false,
     elapsedTime: 0, 
-    rpm: 60,
     heartRate: 0,
     distance: 0,
     formattedTime: '00:00:00',
@@ -22,6 +44,7 @@ Page({
     watt: 0,
     speed: 0,
     load: 1,
+    incline: 0,
     gaugeProgressStyle: '',
     knobAngle: 220, // Start angle
     // 目标模式相关
@@ -40,13 +63,12 @@ Page({
     maxSpeed: 999999, // 默认值，将从dp点115获取
     minSpeed: 0, // 默认值，将从dp点116获取
     // 扬升限制（从dp点获取）
-    maxAscension: 100, // 默认值，将从dp点117获取
+    maxAscension: 15, // 默认值，将从dp点117获取
     minAscension: 0, // 默认值，将从dp点118获取
     // 国际化文本（初始化为空，在 onLoad 中根据系统语言设置）
     speedKmhLabel: '',
     caloriesKcalLabel: '',
     workoutTimeLabel: '',
-    rpmLabel: '',
     hrBpmLabel: '',
     powerWLabel: '',
     distanceKmLabel: '',
@@ -66,7 +88,28 @@ Page({
   resistanceSum: 0, // 阻力总和
   resistanceCount: 0 ,// 阻力计数
   isStopping: false, // 防止重复处理停止逻辑
+  deviceInfo: null, // 设备信息缓存（在线/蓝牙状态）
+  publishInFlightMap: null, // DP下发队列锁
+  publishQueueMap: null, // DP下发待发送缓存
+  publishDebounceTimers: null, // DP下发防抖计时器
   dpMaxResistance: null, // 设备上报的最大阻力
+  deviceId: '',
+  mainActionLocked: false,
+  longPressTriggered: false,
+  maxSpeedDuring: null,
+  minSpeedDuring: null,
+  maxInclineDuring: null,
+  minInclineDuring: null,
+  cloudReported: false,
+  cloudReportPromise: null,
+  endingWorkout: false,
+  sportStateDpMode: null,
+  sportStateValueMap: { ...SPORT_STATE_DP_VALUE_STRING, END: SPORT_STATE_DP_VALUE_STRING.STOP },
+  gaugeDpId: DP.resistance,
+  speedUiLocked: false,
+  pendingSpeedValue: null,
+  speedUnlockTimer: null,
+  lastDeviceSpeedValue: null,
   
 
   /**
@@ -75,6 +118,268 @@ Page({
    */
   getI18n() {
     return global.I18n || I18nUtil;
+  },
+
+  getDeviceId() {
+    const launchOptions = ty.getLaunchOptionsSync();
+    return this.deviceId || launchOptions.query?.deviceId || launchOptions.query?.devId;
+  },
+
+  getGaugeDpId() {
+    return this.gaugeDpId || DP.resistance;
+  },
+
+  resetWorkoutStats() {
+    this.maxSpeedDuring = null;
+    this.minSpeedDuring = null;
+    this.maxInclineDuring = null;
+    this.minInclineDuring = null;
+    this.cloudReported = false;
+    this.cloudReportPromise = null;
+    this.endingWorkout = false;
+    this.isStopping = false;
+  },
+
+  trackSpeed(value) {
+    if (!this.isRunning) return;
+    const speedValue = typeof value === 'number' ? value : parseFloat(value);
+    if (!Number.isFinite(speedValue) || speedValue <= 0) return;
+    if (this.maxSpeedDuring === null || speedValue > this.maxSpeedDuring) {
+      this.maxSpeedDuring = speedValue;
+    }
+    if (this.minSpeedDuring === null || speedValue < this.minSpeedDuring) {
+      this.minSpeedDuring = speedValue;
+    }
+  },
+
+  trackIncline(value) {
+    if (!this.isRunning) return;
+    const inclineValue = typeof value === 'number' ? value : parseFloat(value);
+    if (!Number.isFinite(inclineValue)) return;
+    if (this.maxInclineDuring === null || inclineValue > this.maxInclineDuring) {
+      this.maxInclineDuring = inclineValue;
+    }
+    if (this.minInclineDuring === null || inclineValue < this.minInclineDuring) {
+      this.minInclineDuring = inclineValue;
+    }
+  },
+
+  getInclineValue() {
+    const inclineRaw = this.data.incline !== undefined ? this.data.incline : this.data.load;
+    const inclineValue = typeof inclineRaw === 'number' ? inclineRaw : parseFloat(inclineRaw);
+    return Number.isFinite(inclineValue) ? inclineValue : 0;
+  },
+
+  getWorkoutSummaryForUpload() {
+    const speedValue = parseFloat(this.data.speed) || 0;
+    const inclineValue = this.getInclineValue();
+    const maxSpeed = this.maxSpeedDuring ?? (speedValue > 0 ? speedValue : 0);
+    const minSpeed = this.minSpeedDuring ?? (speedValue > 0 ? speedValue : 0);
+    const maxIncline = this.maxInclineDuring ?? inclineValue;
+    const minIncline = this.minInclineDuring ?? inclineValue;
+    const gaugeType = this.getGaugeDpId() === DP.incline ? 'incline' : 'resistance';
+    return {
+      speed: speedValue,
+      maxSpeed,
+      minSpeed,
+      incline: inclineValue,
+      maxIncline,
+      minIncline,
+      gaugeType,
+      speedLimitMax: this.data.maxSpeed,
+      speedLimitMin: this.data.minSpeed,
+      inclineLimitMax: this.data.maxAscension,
+      inclineLimitMin: this.data.minAscension
+    };
+  },
+
+  updateSportStateDpMode(rawState) {
+    if (rawState === undefined || rawState === null) return;
+    if (typeof rawState === 'number') {
+      this.sportStateDpMode = 'number';
+      return;
+    }
+    const str = String(rawState);
+    if (/^-?\d+$/.test(str)) {
+      this.sportStateDpMode = 'number';
+      return;
+    }
+    this.sportStateDpMode = 'string';
+  },
+
+  normalizeSportStateKey(rawState) {
+    if (rawState === undefined || rawState === null) return null;
+    if (typeof rawState === 'number') {
+      if (rawState === 0) return 'START';
+      if (rawState === 1) return 'PAUSE';
+      if (rawState === 2) return 'STOP';
+      return null;
+    }
+    const upper = String(rawState).toUpperCase();
+    if (upper === '0') return 'START';
+    if (upper === '1') return 'PAUSE';
+    if (upper === '2') return 'STOP';
+    if (upper === 'START') return 'START';
+    if (upper === 'PAUSE') return 'PAUSE';
+    if (upper === 'STOP' || upper === 'END') return 'STOP';
+    return null;
+  },
+
+  getSportStateDpValue(stateKey) {
+    const key = String(stateKey || '').toUpperCase();
+    if (this.sportStateDpMode === 'number') {
+      return SPORT_STATE_DP_VALUE_NUMBER[key];
+    }
+    if (this.sportStateValueMap && this.sportStateValueMap[key] !== undefined) {
+      return this.sportStateValueMap[key];
+    }
+    return SPORT_STATE_DP_VALUE_STRING[key];
+  },
+
+  getBleConnectedFlag(deviceInfo) {
+    if (!deviceInfo) return undefined;
+    if (deviceInfo.isBleConnected !== undefined) return deviceInfo.isBleConnected;
+    if (deviceInfo.bleConnected !== undefined) return deviceInfo.bleConnected;
+    if (deviceInfo.bluetoothConnected !== undefined) return deviceInfo.bluetoothConnected;
+    if (deviceInfo.btConnected !== undefined) return deviceInfo.btConnected;
+    return undefined;
+  },
+
+  isDeviceReady(deviceInfo, label) {
+    if (!deviceInfo) return true;
+    if (deviceInfo.online === false) {
+      console.warn('设备离线，DP下发被拦截', label || '', deviceInfo);
+      ty.showToast({ title: this.getI18n().t('device_not_connected'), icon: 'none' });
+      return false;
+    }
+    const bleConnected = this.getBleConnectedFlag(deviceInfo);
+    if (bleConnected === false) {
+      console.warn('蓝牙未连接，DP下发被拦截', label || '', deviceInfo);
+      ty.showToast({ title: this.getI18n().t('device_not_connected'), icon: 'none' });
+      return false;
+    }
+    return true;
+  },
+
+  refreshDeviceInfo(callback) {
+    const deviceId = this.getDeviceId();
+    if (!deviceId || !ty.device || !ty.device.getDeviceInfo) {
+      callback && callback(this.deviceInfo);
+      return;
+    }
+    ty.device.getDeviceInfo({
+      deviceId,
+      success: (info) => {
+        this.deviceInfo = info;
+        callback && callback(info);
+      },
+      fail: (err) => {
+        console.warn('获取设备信息失败，继续使用缓存', err);
+        callback && callback(this.deviceInfo);
+      }
+    });
+  },
+
+  queuePublishDps(dps, options = {}, debounceMs = 120) {
+    const queueKey = options.queueKey || 'default';
+    if (!this.publishDebounceTimers) this.publishDebounceTimers = {};
+    if (this.publishDebounceTimers[queueKey]) {
+      clearTimeout(this.publishDebounceTimers[queueKey]);
+    }
+    this.publishDebounceTimers[queueKey] = setTimeout(() => {
+      this.publishDpsSafe(dps, { ...options, queueKey });
+    }, debounceMs);
+  },
+
+  publishDpsSafe(dps, { success, fail, label, mode, pipelines, queueKey } = {}) {
+    const deviceId = this.getDeviceId();
+    if (!deviceId) {
+      console.warn('deviceId不存在，DP下发被忽略', label || '');
+      ty.showToast({ title: this.getI18n().t('device_not_found'), icon: 'none' });
+      return;
+    }
+
+    const cleanedDps = {};
+    Object.keys(dps || {}).forEach((key) => {
+      const value = dps[key];
+      if (value !== undefined && value !== null) {
+        cleanedDps[key] = value;
+      }
+    });
+
+    if (!Object.keys(cleanedDps).length) {
+      console.warn('DP下发数据为空，已忽略', label || '');
+      return;
+    }
+
+    if (queueKey) {
+      if (!this.publishInFlightMap) this.publishInFlightMap = {};
+      if (!this.publishQueueMap) this.publishQueueMap = {};
+      if (this.publishInFlightMap[queueKey]) {
+        this.publishQueueMap[queueKey] = {
+          dps: cleanedDps,
+          options: { success, fail, label, mode, pipelines, queueKey }
+        };
+        console.log('DP下发排队中', label || '', cleanedDps);
+        return;
+      }
+    }
+
+    const resolvedMode = mode !== undefined ? mode : 2; // 0: LAN, 1: Network, 2: Auto
+    const resolvedPipelines = pipelines || [0, 1, 3]; // 优先使用 LAN/MQTT/BLE，减少无效通道
+
+    const finalizeQueue = () => {
+      if (!queueKey) return;
+      this.publishInFlightMap[queueKey] = false;
+      const pending = this.publishQueueMap[queueKey];
+      if (pending) {
+        delete this.publishQueueMap[queueKey];
+        this.publishDpsSafe(pending.dps, pending.options);
+      }
+    };
+
+    const doPublish = () => {
+      if (queueKey) {
+        this.publishInFlightMap[queueKey] = true;
+      }
+      ty.device.publishDps({
+        deviceId,
+        dps: cleanedDps,
+        mode: resolvedMode,
+        pipelines: resolvedPipelines,
+        success: (res) => {
+          success && success(res);
+          finalizeQueue();
+        },
+        fail: (err) => {
+          console.error('DP下发失败', label || '', {
+            deviceId,
+            dps: cleanedDps,
+            err
+          });
+          fail && fail(err);
+          finalizeQueue();
+        }
+      });
+    };
+
+    this.refreshDeviceInfo((info) => {
+      if (!this.isDeviceReady(info, label)) {
+        fail && fail({ errorCode: 'PRECHECK_BLOCK', errorMsg: 'device offline or bluetooth disconnected' });
+        return;
+      }
+      doPublish();
+    });
+  },
+
+  lockMainAction() {
+    if (this.mainActionLocked) return true;
+    this.mainActionLocked = true;
+    clearTimeout(this.mainActionLockTimer);
+    this.mainActionLockTimer = setTimeout(() => {
+      this.mainActionLocked = false;
+    }, 500);
+    return false;
   },
   
   onLoad(options) {
@@ -86,7 +391,6 @@ Page({
       speedKmhLabel: currentI18n.t('speed_kmh'),
       caloriesKcalLabel: currentI18n.t('calories_kcal'),
       workoutTimeLabel: currentI18n.t('workout_time'),
-      rpmLabel: currentI18n.t('rpm'),
       hrBpmLabel: currentI18n.t('hr_bpm'),
       powerWLabel: currentI18n.t('power_w'),
       distanceKmLabel: currentI18n.t('distance_km'),
@@ -108,6 +412,15 @@ Page({
       console.log('hideMenuButton fail', error);
     } });
     console.log('Exercise Page Load', options);
+
+    const launchOptions = ty.getLaunchOptionsSync();
+    const resolvedDeviceId = options?.deviceId || launchOptions.query?.deviceId || launchOptions.query?.devId;
+    if (resolvedDeviceId) {
+      this.deviceId = resolvedDeviceId;
+      this.refreshDeviceInfo();
+    } else {
+      console.warn('deviceId不存在，DP下发将失败');
+    }
     
     // 检查是否是目标模式
     const goalType = options.goalType;
@@ -135,6 +448,7 @@ Page({
     this.isRunning = false,   // 是否正在运动
     this.isPausing = false,   // 是否处于暂停
     this.isStopping = false   // 是否正在结束
+    this.resetWorkoutStats();
     
     // 初始化目标模式的初始值记录（用于从0开始计算）
     if (this.data.isGoalMode) {
@@ -168,39 +482,46 @@ Page({
       // 若有其他数字需要同步更新，在此处添加 setData 即可，例如：
       // this.setData({ loadNumber: finalLoad });
     }, 200);
-    // 原生调用方式
+// 原生调用方式
 const { onDpDataChange, registerDeviceListListener } = ty.device;
-const { getLaunchOptionsSync } = ty;
-// 启动参数中获取设备 id
-const {
-  query: { deviceId }
-} = getLaunchOptionsSync();
+const deviceId = this.getDeviceId();
  
 const _onDpDataChange = (event) => {
   // console.log(formatDpState(event.dps));
 console.log('dp点数组:'+ JSON.stringify(formatDpState(event.dps)));
 const dpID = formatDpState(event.dps);  //dpID 数组
 dpID.forEach(element => {
-  if (element.code === 106) { // 只判断code=106，再处理不同的value
-    const sportState = element.value?.toUpperCase(); // 统一转大写，兼容大小写
-    console.log('硬件上报运动状态:', sportState);
-  
+  if (element.code === DP.sportState) { // 只判断code=106，再处理不同的value
+    const rawState = element.value;
+    this.updateSportStateDpMode(rawState);
+    const sportStateKey = this.normalizeSportStateKey(rawState);
+    console.log('硬件上报运动状态:', sportStateKey, rawState);
+
     // 避免重复处理（结合isStopping/isStarting等状态）
-    switch (sportState) {
-      case 'START': // 硬件上报“开始”
+    switch (sportStateKey) {
+      case 'START':
         if (!this.isRunning) {
           this.handleStartExercise(false); // false：硬件主动开始，软件不回发指令
+        } else if (this.data.isPaused) {
+          this.setData({ isPaused: false });
         }
+        this.isRunning = true;
+        this.isPausing = false;
         break;
-      
-      case 'PAUSE': // 硬件上报“暂停（继续的前置状态）”
+
+      case 'PAUSE':
         if (this.isRunning && !this.isPausing) {
           this.handlePauseExercise(false); // 处理暂停逻辑
+        } else {
+          this.setData({ isPaused: true });
         }
         break;
-      
-        case 'END': // 硬件上报“结束”（对应之前的STOP）
-        if (!this.isStopping) {
+
+      case 'STOP':
+        this.isRunning = false;
+        this.isPausing = false;
+        this.setData({ isPaused: false });
+        if (!this.isStopping && !this.endingWorkout) {
           this.handleStopExercise(false); // 处理结束逻辑
         }
         break;
@@ -208,14 +529,33 @@ dpID.forEach(element => {
     return;
   }
   //速度
-  if(element.code == 112) {
-    this.setData({
-      speed: (element.value/1000).toFixed(1)
-    });
+  if (element.code == DP.speed) {
+    const rawSpeedValue = Number(element.value);
+    if (!Number.isFinite(rawSpeedValue)) {
+      return;
+    }
+    const speedValue = (rawSpeedValue % 1 !== 0 && rawSpeedValue <= 30)
+      ? rawSpeedValue
+      : rawSpeedValue / 10;
+    if (Number.isFinite(speedValue)) {
+      const pending = this.pendingSpeedValue;
+      const pendingNum = pending === null || pending === undefined ? null : Number(pending);
+      const tolerance = 0.11;
+      this.lastDeviceSpeedValue = speedValue;
+      if (this.speedUiLocked && pendingNum !== null) {
+        if (Math.abs(speedValue - pendingNum) <= tolerance) {
+          this.unlockSpeedUi();
+        } else {
+          return;
+        }
+      }
+      this.setData({ speed: speedValue.toFixed(1) });
+      this.trackSpeed(speedValue);
+    }
   }
 
   // 时间 - DP 108 (Workout Time)
-  if(element.code == 108) {
+  if(element.code == DP.workoutTime) {
     if (this.data.isGoalMode && this.data.goalType === 'time') {
       // 目标模式下的时间目标：使用倒计时，不直接使用硬件上报的时间
       // 但可以用于记录实际运动时间
@@ -229,14 +569,14 @@ dpID.forEach(element => {
     }
   }
   //心率 - DP 110
-  if(element.code == 110) {
+  if(element.code == DP.heartRate) {
     this.setData({
       heartRate: element.value
     });
   }
   // 距离 - DP 103 (里程)
-  if (element.code == 103) {
-    const rawDistance = element.value / 1000;
+  if (element.code == DP.distance) {
+    const rawDistance = element.value / 100;
     if (this.data.isGoalMode) {
       // 目标模式：从0开始
       if (this.initialDistance === null) {
@@ -257,9 +597,9 @@ dpID.forEach(element => {
     }
   }
  // 卡路里 - DP 105
- if(element.code == 105) {
+ if(element.code == DP.calories) {
   console.log('卡路里:', element.value);
-  const rawCalories = element.value / 1000;
+  const rawCalories = element.value ;
   if (this.data.isGoalMode) {
     // 目标模式：从0开始
     if (this.initialCalories === null) {
@@ -267,7 +607,7 @@ dpID.forEach(element => {
     }
     const currentCalories = Math.max(0, rawCalories - this.initialCalories);
     this.setData({
-      calories: currentCalories.toFixed(1)
+      calories: currentCalories.toFixed(0)
     });
     // 检查目标完成
     if (this.data.goalType === 'calories' && currentCalories >= this.data.goalValue) {
@@ -275,30 +615,35 @@ dpID.forEach(element => {
     }
   } else {
     this.setData({
-      calories: rawCalories.toFixed(1)
+      calories: rawCalories.toFixed(0)
     });
   }
 }
   //阻力 - DP 107
-  if(element.code == 107) {
+  if(element.code == DP.resistance) {
     console.log('阻力:', element.value);
     const loadValue = element.value;
-    this.setData({
-      load: loadValue
-    });
+    if (!this.gaugeDpId || this.gaugeDpId === DP.resistance) {
+      this.gaugeDpId = DP.resistance;
+      this.setData({
+        load: loadValue
+      });
+    }
   }
   // 最大速度限制 (dp点115)
   if(element.code == 115) {
     console.log('最大速度限制:', element.value);
+    const maxSpeedValue = Number(element.value);
     this.setData({
-      maxSpeed: element.value
+      maxSpeed: Number.isFinite(maxSpeedValue) ? (maxSpeedValue / 10) : this.data.maxSpeed
     });
   }
   // 最小速度限制 (dp点116)
   if(element.code == 116) {
     console.log('最小速度限制:', element.value);
+    const minSpeedValue = Number(element.value);
     this.setData({
-      minSpeed: element.value
+      minSpeed: Number.isFinite(minSpeedValue) ? (minSpeedValue / 10) : this.data.minSpeed
     });
   }
   // 最大扬升限制 (dp点117)
@@ -316,11 +661,15 @@ dpID.forEach(element => {
     });
   }
   //扬升 - DP 114
-  if(element.code == 114) {
+  if(element.code == DP.incline) {
     console.log('扬升:', element.value);
+    const inclineValue = Number(element.value);
+    this.gaugeDpId = DP.incline;
     this.setData({
-      incline: element.value
+      incline: inclineValue,
+      load: inclineValue
     });
+    this.trackIncline(inclineValue);
   }
   //历史记录 - DP 113
   if(element.code == 113) {
@@ -330,16 +679,27 @@ dpID.forEach(element => {
 });
 }
 
-registerDeviceListListener({
-  deviceIdList: [deviceId],
-  success: () => {
-    console.log('registerDeviceListListener success');
-  },
-  fail: (error) => {
-    console.log('registerDeviceListListener fail', error);
-  }
-  });
+if (deviceId) {
+  registerDeviceListListener({
+    deviceIdList: [deviceId],
+    success: () => {
+      console.log('registerDeviceListListener success');
+    },
+    fail: (error) => {
+      console.log('registerDeviceListListener fail', error);
+    }
+    });
+} else {
+  console.warn('deviceId不存在，无法注册设备监听');
+}
 onDpDataChange(_onDpDataChange);
+  },
+
+  onShow() {
+    if (!this.isRunning) {
+      this.isStopping = false;
+      this.endingWorkout = false;
+    }
   },
 
   onUnload() {
@@ -419,77 +779,72 @@ onDpDataChange(_onDpDataChange);
 
   // 处理开始运动
   handleStartExercise(sendCommand) {
-    if (this.isRunning) {
+    if (this.isRunning && !this.data.isPaused) {
       console.log('运动已在进行中，跳过重复开始');
       return;
     }
     
+    const wasRunning = this.isRunning;
+    const wasPaused = this.data.isPaused;
+    if (!wasRunning) {
+      this.resetWorkoutStats();
+    }
     this.isRunning = true;
     this.isPausing = false;
     
     // 确保阻力值已设置（至少为1），这样硬件才能开始上报RPM和Watt
     const currentLoad = this.data.load || 1;
-    const { query: { deviceId } } = ty.getLaunchOptionsSync();
     
     // 先设置阻力，确保硬件开始上报数据
-    if (deviceId) {
-      ty.device.publishDps({
-        deviceId,
-        dps: { 107: currentLoad },
-        mode: 1,
-        pipelines: [0, 1, 2, 3, 4, 5, 6],
+    this.publishDpsSafe(
+      { [this.getGaugeDpId()]: currentLoad },
+      {
+        label: 'set_resistance_before_start',
         success: () => {
           console.log('阻力已设置:', currentLoad);
           this.updateGauge(currentLoad);
-          
+
           // 阻力设置成功后再发送开始命令
           if (sendCommand) {
-            ty.device.publishDps({
-              deviceId,
-              dps: { 106: 'START' },
-              mode: 1,
-              pipelines: [0, 1, 2, 3, 4, 5, 6],
-              success: () => {
-                console.log('开始运动命令已发送');
-                this.setData({ isPaused: false });
-              },
-              fail: (err) => {
-                console.error('开始运动命令发送失败:', err);
+            this.publishDpsSafe(
+              { [DP.sportState]: this.getSportStateDpValue('START') },
+              {
+                label: 'start_exercise',
+                success: () => {
+                  console.log('开始运动命令已发送');
+                  this.setData({ isPaused: false });
+                  if (wasPaused) {
+                    ty.showToast({ title: this.getI18n().t('resumed'), icon: 'none' });
+                  }
+                }
               }
-            });
+            );
           } else {
             this.setData({ isPaused: false });
           }
         },
-        fail: (err) => {
-          console.error('设置阻力失败:', err);
+        fail: () => {
           // 即使设置阻力失败，也继续发送开始命令
           if (sendCommand) {
-            ty.device.publishDps({
-              deviceId,
-              dps: { 106: 'START' },
-              mode: 1,
-              pipelines: [0, 1, 2, 3, 4, 5, 6],
-              success: () => {
-                console.log('开始运动命令已发送');
-                this.setData({ isPaused: false });
-              },
-              fail: (err) => {
-                console.error('开始运动命令发送失败:', err);
+            this.publishDpsSafe(
+              { [DP.sportState]: this.getSportStateDpValue('START') },
+              {
+                label: 'start_exercise_after_resistance_fail',
+                success: () => {
+                  console.log('开始运动命令已发送');
+                  this.setData({ isPaused: false });
+                  if (wasPaused) {
+                    ty.showToast({ title: this.getI18n().t('resumed'), icon: 'none' });
+                  }
+                }
               }
-            });
+            );
           } else {
             this.setData({ isPaused: false });
           }
         }
-      });
-    } else {
-      // 如果没有deviceId，直接更新状态
-      if (sendCommand) {
-        console.warn('deviceId不存在，无法发送命令');
       }
-      this.setData({ isPaused: false });
-    }
+    );
   },
 
   // 处理暂停运动
@@ -502,102 +857,59 @@ onDpDataChange(_onDpDataChange);
     this.isPausing = true;
     
     if (sendCommand) {
-      const { query: { deviceId } } = ty.getLaunchOptionsSync();
-      if (deviceId) {
-        ty.device.publishDps({
-          deviceId,
-          dps: { 106: 'PAUSE' },
-          mode: 1,
-          pipelines: [0, 1, 2, 3, 4, 5, 6],
+      this.publishDpsSafe(
+        { [DP.sportState]: this.getSportStateDpValue('PAUSE') },
+        {
+          label: 'pause_exercise',
           success: () => {
             console.log('暂停命令已发送');
             this.setData({ isPaused: true });
-          },
-          fail: (err) => {
-            console.error('暂停命令发送失败:', err);
+            ty.showToast({ title: this.getI18n().t('paused'), icon: 'none' });
           }
-        });
-      }
+        }
+      );
     } else {
       this.setData({ isPaused: true });
     }
   },
 
   togglePause() {
-    const { query: { deviceId } } = ty.getLaunchOptionsSync();
-    const targetState = !this.data.isPaused;
-    // 替换为硬件实际的暂停/继续指令（如硬件用 0 表示暂停，1 表示继续）
-    const controlCmd = targetState ? 'PAUSE' : 'START'; 
-  
-    if (!targetState) {
-      // 如果继续运动，先确保阻力已设置，然后再发送开始命令
-      const currentLoad = this.data.load || 1;
-      this.isRunning = true;
-      this.isPausing = false;
-      
-      // 先设置阻力，确保硬件开始上报RPM和Watt
-      ty.device.publishDps({
-        deviceId,
-        dps: { 107: currentLoad },
-        mode: 1,
-        pipelines: [0, 1, 2, 3, 4, 5, 6],
-        success: () => {
-          console.log('继续运动时设置阻力:', currentLoad);
-          this.updateGauge(currentLoad);
-          
-          // 阻力设置成功后再发送开始命令
-          ty.device.publishDps({
-            deviceId,
-            dps: { 106: 'START' },
-            mode: 1,
-            pipelines: [0, 1, 2, 3, 4, 5, 6],
-            success: () => {
-              this.setData({ isPaused: false });
-              ty.showToast({ title: this.getI18n().t('resumed'), icon: 'none' });
-            },
-            fail: (err) => {
-              console.error('继续运动命令发送失败:', err);
-              ty.showToast({ title: this.getI18n().t('operation_failed'), icon: 'none' });
-            }
-          });
-        },
-        fail: (err) => {
-          console.error('设置阻力失败:', err);
-          // 即使设置阻力失败，也继续发送开始命令
-          ty.device.publishDps({
-            deviceId,
-            dps: { 106: 'START' },
-            mode: 1,
-            pipelines: [0, 1, 2, 3, 4, 5, 6],
-            success: () => {
-              this.setData({ isPaused: false });
-              ty.showToast({ title: this.getI18n().t('resumed'), icon: 'none' });
-            },
-            fail: (err) => {
-              console.error('继续运动命令发送失败:', err);
-              ty.showToast({ title: this.getI18n().t('operation_failed'), icon: 'none' });
-            }
-          });
-        }
-      });
-    } else {
-      // 暂停运动
-      ty.device.publishDps({
-        deviceId,
-        dps: { 106: 'PAUSE' },
-        mode: 1,
-        pipelines: [0, 1, 2, 3, 4, 5, 6],
-        success: () => {
-          this.setData({ isPaused: true });
-          this.isPausing = true;
-          ty.showToast({ title: this.getI18n().t('paused'), icon: 'none' });
-        },
-        fail: (err) => {
-          console.error('暂停命令发送失败:', err);
-          ty.showToast({ title: this.getI18n().t('operation_failed'), icon: 'none' });
-        }
-      });
+    this.handleMainActionTap();
+  },
+
+  handleMainActionTap() {
+    if (this.longPressTriggered) {
+      this.longPressTriggered = false;
+      return;
     }
+    if (this.lockMainAction()) return;
+
+    if (!this.isRunning || this.data.isPaused) {
+      this.handleStartExercise(true);
+    } else {
+      this.handlePauseExercise(true);
+    }
+  },
+
+  handleMainActionLongPress() {
+    if (this.lockMainAction()) return;
+    if (!this.isRunning) return;
+    this.longPressTriggered = true;
+    clearTimeout(this.longPressResetTimer);
+    this.longPressResetTimer = setTimeout(() => {
+      this.longPressTriggered = false;
+    }, 600);
+    ty.showModal({
+      title: this.getI18n().t('end_workout'),
+      content: this.getI18n().t('end_workout_confirm'),
+      confirmText: this.getI18n().t('confirm'),
+      cancelText: this.getI18n().t('cancel'),
+      success: (res) => {
+        if (res.confirm) {
+          this.stopExercise();
+        }
+      }
+    });
   },
 
   // 检查目标是否完成
@@ -631,16 +943,7 @@ onDpDataChange(_onDpDataChange);
         cancelText: this.getI18n().t('cancel'),
         success: (res) => {
           if (res.confirm) {
-            // 先上报数据到云端，再处理停止逻辑
-            const { query: { deviceId } } = ty.getLaunchOptionsSync();
-            if (deviceId) {
-              console.log('目标完成，开始上报数据到云端');
-              this.reportExerciseDataToCloud(deviceId);
-            } else {
-              console.warn('目标完成，但设备ID为空，无法上报数据');
-            }
-            // 跳转到congrats页面
-            this.handleStopExercise(true);
+            this.stopExercise();
           } else {
             // 取消：继续运动
             this.setData({ 
@@ -654,117 +957,86 @@ onDpDataChange(_onDpDataChange);
   },
 
   stopExercise() {
-    ty.showModal({
-      title: this.getI18n().t('end_workout'),
-      content: this.getI18n().t('end_workout_confirm'),
-      confirmText: this.getI18n().t('confirm'),
-      cancelText: this.getI18n().t('cancel'),
-      success: (res) => {
-        if (res.confirm) {
-          // 向硬件发送停止命令
-          const { query: { deviceId } } = ty.getLaunchOptionsSync();
-          if (deviceId) {
-            ty.device.publishDps({
-              deviceId,
-              dps: { 106: 'END' },
-              mode: 1,
-              pipelines: [0, 1, 2, 3, 4, 5, 6],
-              success: () => {
-                console.log('停止命令已发送到硬件');
-                // 停止命令发送成功后，上报运动数据到云端
-                this.reportExerciseDataToCloud(deviceId);
-                this.handleStopExercise(true); // true表示已发送命令
-              },
-              fail: (err) => {
-                console.error('硬件停止指令发送失败:', err);
-                // 即使发送失败，也继续执行停止逻辑，并尝试上报数据
-                this.reportExerciseDataToCloud(deviceId);
-                this.handleStopExercise(true);
-              }
-            });
-          } else {
-            // 如果没有deviceId，直接执行停止逻辑
-            this.handleStopExercise(true);
-          }
-        }
-      }
-    });
+    if (this.endingWorkout) return;
+    this.endingWorkout = true;
+    const currentI18n = this.getI18n();
+    const now = new Date();
+    const deviceId = this.getDeviceId();
+    const exerciseRecord = this.buildExerciseRecord(now);
+
+    try {
+      ty.showLoading({ title: currentI18n.t('end_workout') });
+    } catch (error) {}
+
+    if (deviceId) {
+      this.publishDpsSafe(
+        { [DP.sportState]: this.getSportStateDpValue('STOP') },
+        { label: 'stop_exercise', queueKey: 'sport_state' }
+      );
+      this.reportExerciseDataToCloud(deviceId, exerciseRecord).catch(() => null);
+    }
+
+    this.isRunning = false;
+    this.isPausing = false;
+    this.setData({ isPaused: false });
+    this.handleStopExercise(true, exerciseRecord);
+
+    try {
+      ty.hideLoading();
+    } catch (error) {}
+    this.endingWorkout = false;
   },
 
   // 上报运动数据到云端（通过 DP 点 112）
-  reportExerciseDataToCloud(deviceId) {
+  reportExerciseDataToCloud(deviceId, exerciseRecord) {
     if (!deviceId) {
       console.warn('设备ID为空，无法上报数据到云端');
-      return;
+      return Promise.resolve(null);
+    }
+    if (this.cloudReportPromise) {
+      return this.cloudReportPromise;
+    }
+    if (this.cloudReported) {
+      return Promise.resolve(null);
     }
 
     try {
-      // 收集所有运动数据
-      const now = new Date();
-      const timestamp = now.getTime();
-      const elapsedSeconds = this.data.elapsedTime;
+      const recordForUpload = exerciseRecord || this.buildExerciseRecord(new Date());
       
-      // 计算平均阻力
-      const avgResistance = this.resistanceCount > 0 
-        ? (this.resistanceSum / this.resistanceCount).toFixed(1) 
-        : this.data.load;
-      
-      // 格式化时间
-      const durationFormatted = this.formatTime(elapsedSeconds);
-      
-      // 构建运动记录对象
-      const finalMaxResistance = this.dpMaxResistance ?? this.maxResistance ?? 0;
-      // 确保 isGoalMode 和 pageTitle 正确传递
-      const isGoalMode = this.data.isGoalMode === true;
-      const pageTitle = this.data.pageTitle || (isGoalMode ? this.getI18n().t('target_pattern') : this.getI18n().t('quick_start'));
-      
-      const exerciseRecord = {
-        id: timestamp,
-        duration: elapsedSeconds,
-        durationFormatted: durationFormatted,
-        date: now.toISOString(),
-        speed: parseFloat(this.data.speed) || 0,
-        rpm: parseFloat(this.data.rpm) || 0,
-        calories: parseFloat(this.data.calories) || 0,
-        distance: parseFloat(this.data.distance) || 0,
-        watt: this.data.watt || 0,
-        heartRate: this.data.heartRate || 0,
-        load: this.data.load || 0,
-        maxResistance: finalMaxResistance,
-        minResistance: this.minResistance || 0,
-        avgResistance: parseFloat(avgResistance) || 0,
-
-        isGoalMode: isGoalMode,
-        pageTitle: pageTitle,
-      };
-      
-      console.log('构建运动记录 - isGoalMode:', isGoalMode, 'pageTitle:', pageTitle);
+      console.log('构建运动记录 - isGoalMode:', recordForUpload.isGoalMode, 'pageTitle:', recordForUpload.pageTitle);
       console.log('=== 上报运动数据到云端 ===');
       console.log('设备ID:', deviceId);
-      console.log('运动记录ID:', exerciseRecord.id);
-      console.log('原始记录数据:', JSON.stringify(exerciseRecord, null, 2));
+      console.log('运动记录ID:', recordForUpload.id);
 
-      // 使用 cloudSync.js 的 saveHistoryToCloud 方法上传到云端
-      saveHistoryToCloud(deviceId, exerciseRecord)
+      this.cloudReportPromise = saveHistoryToCloud(deviceId, recordForUpload)
         .then((res) => {
+          this.cloudReported = true;
+          this.cloudReportPromise = null;
           console.log('✓ 运动数据已成功上传到云端');
-          console.log('响应数据:', JSON.stringify(res, null, 2));
+          return res;
         })
         .catch((error) => {
+          this.cloudReported = false;
+          this.cloudReportPromise = null;
           console.error('✗ 运动数据上传到云端失败:');
           console.error('错误详情:', JSON.stringify(error, null, 2));
           console.error('错误消息:', error.errorMsg || error.message || error);
           console.error('错误代码:', error.errorCode || error.code);
+          if (error && (error.errorCode === 20028 || error.code === 20028)) {
+            console.error('运动数据上传失败：DP 下发被设备拒绝，可能原因：设备繁忙或数据不符合 DP 限制', error);
+          }
+          return null;
         });
-
+      return this.cloudReportPromise;
     } catch (error) {
       console.error('上报运动数据到云端失败:', error);
+      return Promise.resolve(null);
     }
   },
 
   // 处理停止运动的通用方法
   // sendCommand: true表示已经发送了命令（或不需要发送），false表示不需要发送命令（硬件触发的）
-  handleStopExercise(sendCommand) {
+  handleStopExercise(sendCommand, preparedRecord) {
     // 防止重复处理
     if (this.isStopping) {
       console.log('停止逻辑已在处理中，跳过重复调用');
@@ -775,64 +1047,20 @@ onDpDataChange(_onDpDataChange);
     // 停止计时器
     this.stopTimer();
     
-    // 收集所有运动数据
-    const now = new Date();
-    const timestamp = now.getTime();
-    const elapsedSeconds = this.data.elapsedTime;
-    
-    // 计算平均阻力
-    const avgResistance = this.resistanceCount > 0 
-      ? (this.resistanceSum / this.resistanceCount).toFixed(1) 
-      : this.data.load;
-    
-    // 单位转换：速度从 mi/h 转为 km/h
-    const speedKmh = (parseFloat(this.data.speed) * 1.609).toFixed(1);
- 
-    
-    // 格式化时间
-    const durationFormatted = this.formatTime(elapsedSeconds);
-    
-    // 格式化日期 - congrats格式: "2025/09/12"
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const dateCongrats = `${year}/${month}/${day}`;
-    
-    // 格式化日期 - history格式: "12月11日 12:01:03"
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    // 使用中文字符，确保UTF-8编码正确
-    const dateFormatted = `${month}月${day}日 ${hours}:${minutes}:${seconds}`;
-    
-    // 构建运动记录对象
-    const finalMaxResistance = this.dpMaxResistance ?? this.maxResistance ?? 0;
-    // 确保 isGoalMode 和 pageTitle 正确传递
-    const isGoalMode = this.data.isGoalMode === true;
-    const currentI18n = this.getI18n();
-    const pageTitle = this.data.pageTitle || (isGoalMode ? currentI18n.t('target_pattern') : currentI18n.t('quick_start'));
-    
-    const exerciseRecord = {
-      id: timestamp,
-      duration: elapsedSeconds,
-      durationFormatted: durationFormatted,
-      date: new Date().toISOString(),
-      dateFormatted: dateFormatted,
-      dateCongrats: dateCongrats,
-      speed: parseFloat(this.data.speed) || 0,
-      rpm: parseFloat(this.data.rpm) || 0,
-      calories: parseFloat(this.data.calories) || 0,
-      distance: parseFloat(this.data.distance) || 0,
-      watt: this.data.watt || 0,
-      heartRate: this.data.heartRate || 0,
-      load: this.data.load || 0,
-      maxResistance: finalMaxResistance,
-      minResistance: this.minResistance || 0,
-      avgResistance: parseFloat(avgResistance) || 0,
-      // 添加模式信息
-      isGoalMode: isGoalMode,
-      pageTitle: pageTitle
-    };
+    const exerciseRecord = preparedRecord || this.buildExerciseRecord(new Date());
+    const timestamp = exerciseRecord.id;
+    const elapsedSeconds = exerciseRecord.duration;
+    const avgResistance = exerciseRecord.avgResistance;
+    const speedKmh = typeof exerciseRecord.speedKmh === 'number'
+      ? exerciseRecord.speedKmh.toFixed(1)
+      : (parseFloat(exerciseRecord.speed) * 1.609).toFixed(1);
+
+    if (!sendCommand) {
+      const deviceId = this.getDeviceId();
+      if (deviceId) {
+        this.reportExerciseDataToCloud(deviceId, exerciseRecord).catch(() => null);
+      }
+    }
     
     // 验证数据完整性
     let saveSuccess = true;
@@ -889,22 +1117,87 @@ onDpDataChange(_onDpDataChange);
     const params = new URLSearchParams({
       id: timestamp.toString(),
       duration: elapsedSeconds.toString(),
-      speed: parseFloat(this.data.speed) || 0,
+      speed: String(parseFloat(exerciseRecord.speed) || 0),
       speedKmh: speedKmh,
-      calories: this.data.calories,
-      distance: this.data.distance,
-      rpm: this.data.rpm.toString(),
-      watt: this.data.watt.toString(),
-      heartRate: this.data.heartRate.toString(),
-      maxResistance: this.maxResistance.toString(),
-      minResistance: this.minResistance.toString(),
-      avgResistance: avgResistance,
-      dateCongrats: dateCongrats
+      calories: String(exerciseRecord.calories ?? 0),
+      distance: String(exerciseRecord.distance ?? 0),
+      hrBpm: String(exerciseRecord.hrBpm ?? exerciseRecord.heartRate ?? 0),
+      watt: String(exerciseRecord.watt ?? 0),
+      heartRate: String(exerciseRecord.heartRate ?? 0),
+      maxResistance: String(exerciseRecord.maxResistance ?? 0),
+      minResistance: String(exerciseRecord.minResistance ?? 0),
+      avgResistance: String(avgResistance ?? 0),
+      maxSpeed: String(exerciseRecord.maxSpeed ?? 0),
+      minSpeed: String(exerciseRecord.minSpeed ?? 0),
+      incline: String(exerciseRecord.incline ?? 0),
+      maxIncline: String(exerciseRecord.maxIncline ?? 0),
+      minIncline: String(exerciseRecord.minIncline ?? 0),
+      dateCongrats: String(exerciseRecord.dateCongrats || '')
     });
     
     ty.navigateTo({
       url: `/pages/congrats/congrats?${params.toString()}`
     });
+  },
+
+  buildExerciseRecord(now) {
+    const timestamp = now.getTime();
+    const elapsedSeconds = this.data.elapsedTime;
+    const summary = this.getWorkoutSummaryForUpload();
+    const avgResistance = this.resistanceCount > 0
+      ? (this.resistanceSum / this.resistanceCount).toFixed(1)
+      : this.data.load;
+
+    const durationFormatted = this.formatTime(elapsedSeconds);
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const dateCongrats = `${year}/${month}/${day}`;
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const dateFormatted = `${month}月${day}日 ${hours}:${minutes}:${seconds}`;
+
+    const finalMaxResistance = this.dpMaxResistance ?? this.maxResistance ?? 0;
+    const isGoalMode = this.data.isGoalMode === true;
+    const currentI18n = this.getI18n();
+    const pageTitle = this.data.pageTitle || (isGoalMode ? currentI18n.t('target_pattern') : currentI18n.t('quick_start'));
+
+    const speedRaw = parseFloat(this.data.speed) || 0;
+    const speedKmhValue = parseFloat((speedRaw * 1.609).toFixed(1));
+    const heartRate = parseFloat(this.data.heartRate) || 0;
+
+    return {
+      id: timestamp,
+      duration: elapsedSeconds,
+      durationFormatted: durationFormatted,
+      date: now.toISOString(),
+      dateFormatted: dateFormatted,
+      dateCongrats: dateCongrats,
+      speed: summary.speed,
+      speedKmh: speedKmhValue,
+      maxSpeed: summary.maxSpeed,
+      minSpeed: summary.minSpeed,
+      calories: parseFloat(this.data.calories) || 0,
+      distance: parseFloat(this.data.distance) || 0,
+      watt: this.data.watt || 0,
+      hrBpm: heartRate,
+      heartRate: heartRate,
+      load: this.data.load || 0,
+      incline: summary.incline,
+      maxIncline: summary.maxIncline,
+      minIncline: summary.minIncline,
+      gaugeType: summary.gaugeType,
+      speedLimitMax: summary.speedLimitMax,
+      speedLimitMin: summary.speedLimitMin,
+      inclineLimitMax: summary.inclineLimitMax,
+      inclineLimitMin: summary.inclineLimitMin,
+      maxResistance: finalMaxResistance,
+      minResistance: this.minResistance || 0,
+      avgResistance: parseFloat(avgResistance) || 0,
+      isGoalMode: isGoalMode,
+      pageTitle: pageTitle
+    };
   },
 
   onReady() {
@@ -946,7 +1239,7 @@ throttle(func, delay) {
   // 仅更新视觉位置（不更新load数据和发送命令）
   updateGaugeVisual(value) {
     // 使用从dp点获取的最大/最小扬升限制
-    const maxAscension = this.data.maxAscension || 100;
+    const maxAscension = this.data.maxAscension || 15;
     const minAscension = this.data.minAscension || 0;
     // 应用最小和最大扬升限制
     const currentValue = Math.min(Math.max(value, minAscension), maxAscension);
@@ -985,7 +1278,7 @@ throttle(func, delay) {
   
     const progress = (adjustedAngle - startAngle) / maxSweep;
     // 使用从dp点获取的最大/最小扬升限制
-    const maxAscension = this.data.maxAscension || 100;
+    const maxAscension = this.data.maxAscension || 15;
     const minAscension = this.data.minAscension || 0;
     const maxLoad = maxAscension; // 使用最大扬升作为上限
     const rawLoad = Math.floor(progress * maxLoad);
@@ -1015,13 +1308,11 @@ throttle(func, delay) {
       }, 50);
       
       // 设备命令发送逻辑不变
-      const { query: { deviceId } } = ty.getLaunchOptionsSync();
-      if (deviceId) {
-        ty.device.publishDps({
-          deviceId,
-          dps: { 107: finalLoad },
-          mode: 1,
-          pipelines: [0, 1, 2, 3, 4, 5, 6],
+      this.queuePublishDps(
+        { [this.getGaugeDpId()]: finalLoad },
+        {
+          label: 'update_load',
+          queueKey: 'load',
           success: () => {
             console.log('Load updated to:', finalLoad);
             if (this.isRunning && !this.data.isPaused) {
@@ -1030,15 +1321,69 @@ throttle(func, delay) {
               console.log('运动未开始，阻力设置后自动开始运动');
               this.handleStartExercise(true);
             }
-          },
-          fail: (err) => {
-            console.error('Failed to update load:', err);
           }
-        });
-      }
+        },
+        150
+      );
     }
     
     this.tempLoad = null;
+  },
+
+  lockSpeedUi(targetSpeed) {
+    this.speedUiLocked = true;
+    const normalized = typeof targetSpeed === 'number' ? targetSpeed : parseFloat(targetSpeed);
+    this.pendingSpeedValue = Number.isFinite(normalized) ? Number(normalized.toFixed(1)) : null;
+    if (this.speedUnlockTimer) {
+      clearTimeout(this.speedUnlockTimer);
+      this.speedUnlockTimer = null;
+    }
+    this.speedUnlockTimer = setTimeout(() => {
+      const tolerance = 0.11;
+      if (this.pendingSpeedValue !== null
+        && Number.isFinite(this.lastDeviceSpeedValue)
+        && Math.abs(this.lastDeviceSpeedValue - this.pendingSpeedValue) > tolerance) {
+        this.setData({ speed: Number(this.lastDeviceSpeedValue).toFixed(1) });
+      }
+      this.speedUiLocked = false;
+      this.pendingSpeedValue = null;
+      this.speedUnlockTimer = null;
+    }, 2000);
+  },
+
+  unlockSpeedUi() {
+    this.speedUiLocked = false;
+    this.pendingSpeedValue = null;
+    if (this.speedUnlockTimer) {
+      clearTimeout(this.speedUnlockTimer);
+      this.speedUnlockTimer = null;
+    }
+  },
+
+  publishSpeedToDevice(newSpeed) {
+    const deviceId = this.getDeviceId();
+    if (!deviceId) return;
+    const maxSpeed = Number.isFinite(parseFloat(this.data.maxSpeed)) ? parseFloat(this.data.maxSpeed) : 999999;
+    const minSpeed = Number.isFinite(parseFloat(this.data.minSpeed)) ? parseFloat(this.data.minSpeed) : 0;
+    const clampedSpeed = Math.min(Math.max(newSpeed, minSpeed), maxSpeed);
+    const raw = Math.round(clampedSpeed * 10);
+    this.queuePublishDps(
+      { [DP.speed]: raw },
+      {
+        label: 'set_speed',
+        queueKey: 'speed',
+        fail: (err) => {
+          this.unlockSpeedUi();
+          if (err && (err.errorCode === 20028 || err.code === 20028)) {
+            console.warn('速度下发失败，设备忙碌或速度超范围', err);
+          }
+          if (this.lastDeviceSpeedValue !== null && this.lastDeviceSpeedValue !== undefined) {
+            this.setData({ speed: Number(this.lastDeviceSpeedValue).toFixed(1) });
+          }
+        }
+      },
+      80
+    );
   },
 
   // 处理速度增加
@@ -1052,6 +1397,7 @@ throttle(func, delay) {
     const maxSpeed = this.data.maxSpeed || 999999;
     // 应用最大速度限制（从dp点115获取）
     const newSpeed = Math.min(currentSpeed + 0.1, maxSpeed);
+    this.lockSpeedUi(newSpeed);
     this.setData({
       speed: newSpeed.toFixed(1)
     });
@@ -1063,17 +1409,7 @@ throttle(func, delay) {
       });
     }, 200);
     
-    // 如果需要同步到硬件，可以在这里添加设备命令
-    const { query: { deviceId } } = ty.getLaunchOptionsSync();
-    if (deviceId) {
-      // 假设速度通过某个 DP 点控制，需要根据实际硬件协议调整
-      // ty.device.publishDps({
-      //   deviceId,
-      //   dps: { 105: Math.round(newSpeed * 1000) }, // 根据实际协议调整
-      //   mode: 1,
-      //   pipelines: [0, 1, 2, 3, 4, 5, 6]
-      // });
-    }
+    this.publishSpeedToDevice(newSpeed);
   },
 
   // 处理速度减少
@@ -1087,6 +1423,7 @@ throttle(func, delay) {
     const minSpeed = this.data.minSpeed || 0;
     // 应用最小速度限制（从dp点116获取）
     const newSpeed = Math.max(currentSpeed - 0.1, minSpeed);
+    this.lockSpeedUi(newSpeed);
     this.setData({
       speed: newSpeed.toFixed(1)
     });
@@ -1098,22 +1435,12 @@ throttle(func, delay) {
       });
     }, 200);
     
-    // 如果需要同步到硬件，可以在这里添加设备命令
-    const { query: { deviceId } } = ty.getLaunchOptionsSync();
-    if (deviceId) {
-      // 假设速度通过某个 DP 点控制，需要根据实际硬件协议调整
-      // ty.device.publishDps({
-      //   deviceId,
-      //   dps: { 105: Math.round(newSpeed * 1000) }, // 根据实际协议调整
-      //   mode: 1,
-      //   pipelines: [0, 1, 2, 3, 4, 5, 6]
-      // });
-    }
+    this.publishSpeedToDevice(newSpeed);
   },
 
   updateGauge(value) {
     // 使用从dp点获取的最大/最小扬升限制
-    const maxAscension = this.data.maxAscension || 100;
+    const maxAscension = this.data.maxAscension || 15;
     const minAscension = this.data.minAscension || 0;
     // 应用最小和最大扬升限制
     const currentValue = Math.min(Math.max(value, minAscension), maxAscension);
@@ -1122,7 +1449,9 @@ throttle(func, delay) {
     const startAngle = 220;
     const knobAngle = startAngle + progressAngle;
 
-    // 更新阻力跟踪
+    if (this.getGaugeDpId() === DP.incline) {
+      this.trackIncline(currentValue);
+    }
     if (this.maxResistance === null || currentValue > this.maxResistance) {
       this.maxResistance = currentValue;
     }
