@@ -99,6 +99,13 @@
   align-items: center;
 }
 
+.card-extra {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24rpx;
+}
+
 .stat-item {
   display: flex;
   flex-direction: column;

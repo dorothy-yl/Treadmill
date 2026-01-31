@@ -7,8 +7,6 @@ function formatDpState(dpState) {
     return Object.keys(dpState).map(dpCode => ({ code: Number(dpCode), value: dpState[dpCode] }));
 }
 
-// 导入云端同步工具
-const { formatHistoryForDp112, saveHistoryToCloud } = require('../../utils/cloudSync.js');
 
 const DP = {
   sportState: 106, // 运动状态（枚举）
@@ -100,8 +98,6 @@ Page({
   minSpeedDuring: null,
   maxInclineDuring: null,
   minInclineDuring: null,
-  cloudReported: false,
-  cloudReportPromise: null,
   endingWorkout: false,
   sportStateDpMode: null,
   sportStateValueMap: { ...SPORT_STATE_DP_VALUE_STRING, END: SPORT_STATE_DP_VALUE_STRING.STOP },
@@ -134,8 +130,6 @@ Page({
     this.minSpeedDuring = null;
     this.maxInclineDuring = null;
     this.minInclineDuring = null;
-    this.cloudReported = false;
-    this.cloudReportPromise = null;
     this.endingWorkout = false;
     this.isStopping = false;
   },
@@ -973,7 +967,6 @@ onDpDataChange(_onDpDataChange);
         { [DP.sportState]: this.getSportStateDpValue('STOP') },
         { label: 'stop_exercise', queueKey: 'sport_state' }
       );
-      this.reportExerciseDataToCloud(deviceId, exerciseRecord).catch(() => null);
     }
 
     this.isRunning = false;
@@ -985,53 +978,6 @@ onDpDataChange(_onDpDataChange);
       ty.hideLoading();
     } catch (error) {}
     this.endingWorkout = false;
-  },
-
-  // 上报运动数据到云端（通过 DP 点 112）
-  reportExerciseDataToCloud(deviceId, exerciseRecord) {
-    if (!deviceId) {
-      console.warn('设备ID为空，无法上报数据到云端');
-      return Promise.resolve(null);
-    }
-    if (this.cloudReportPromise) {
-      return this.cloudReportPromise;
-    }
-    if (this.cloudReported) {
-      return Promise.resolve(null);
-    }
-
-    try {
-      const recordForUpload = exerciseRecord || this.buildExerciseRecord(new Date());
-      
-      console.log('构建运动记录 - isGoalMode:', recordForUpload.isGoalMode, 'pageTitle:', recordForUpload.pageTitle);
-      console.log('=== 上报运动数据到云端 ===');
-      console.log('设备ID:', deviceId);
-      console.log('运动记录ID:', recordForUpload.id);
-
-      this.cloudReportPromise = saveHistoryToCloud(deviceId, recordForUpload)
-        .then((res) => {
-          this.cloudReported = true;
-          this.cloudReportPromise = null;
-          console.log('✓ 运动数据已成功上传到云端');
-          return res;
-        })
-        .catch((error) => {
-          this.cloudReported = false;
-          this.cloudReportPromise = null;
-          console.error('✗ 运动数据上传到云端失败:');
-          console.error('错误详情:', JSON.stringify(error, null, 2));
-          console.error('错误消息:', error.errorMsg || error.message || error);
-          console.error('错误代码:', error.errorCode || error.code);
-          if (error && (error.errorCode === 20028 || error.code === 20028)) {
-            console.error('运动数据上传失败：DP 下发被设备拒绝，可能原因：设备繁忙或数据不符合 DP 限制', error);
-          }
-          return null;
-        });
-      return this.cloudReportPromise;
-    } catch (error) {
-      console.error('上报运动数据到云端失败:', error);
-      return Promise.resolve(null);
-    }
   },
 
   // 处理停止运动的通用方法
@@ -1056,10 +1002,7 @@ onDpDataChange(_onDpDataChange);
       : (parseFloat(exerciseRecord.speed) * 1.609).toFixed(1);
 
     if (!sendCommand) {
-      const deviceId = this.getDeviceId();
-      if (deviceId) {
-        this.reportExerciseDataToCloud(deviceId, exerciseRecord).catch(() => null);
-      }
+      // 仅本地存储，硬件触发停止不进行云端上报
     }
     
     // 验证数据完整性
@@ -1073,20 +1016,50 @@ onDpDataChange(_onDpDataChange);
       saveSuccess = false;
     } else {
       // 保存到storage
+      // 统一使用字符串key的方式获取存储数据
+      let history = [];
+      let updatedHistory = null;
+      
       try {
-        // 统一使用字符串key的方式获取存储数据
-        const history = ty.getStorageSync('exerciseHistory') || [];
+        history = ty.getStorageSync('exerciseHistory') || [];
         
         // 确保history是数组
         if (!Array.isArray(history)) {
           console.warn('exerciseHistory is not an array, resetting to empty array');
           ty.setStorageSync('exerciseHistory', []);
+          history = [];
         }
         
         // 添加到数组开头（最新的在前）
-        const updatedHistory = [exerciseRecord, ...history];
+        updatedHistory = [exerciseRecord, ...history];
+        
+        // 准备跳转参数
+        const params = new URLSearchParams({
+          id: timestamp.toString(),
+          duration: elapsedSeconds.toString(),
+          speed: String(parseFloat(exerciseRecord.speed) || 0),
+          speedKmh: speedKmh,
+          calories: String(exerciseRecord.calories ?? 0),
+          distance: String(exerciseRecord.distance ?? 0),
+          hrBpm: String(exerciseRecord.hrBpm ?? exerciseRecord.heartRate ?? 0),
+          watt: String(exerciseRecord.watt ?? 0),
+          heartRate: String(exerciseRecord.heartRate ?? 0),
+          maxResistance: String(exerciseRecord.maxResistance ?? 0),
+          minResistance: String(exerciseRecord.minResistance ?? 0),
+          avgResistance: String(avgResistance ?? 0),
+          maxSpeed: String(exerciseRecord.maxSpeed ?? 0),
+          minSpeed: String(exerciseRecord.minSpeed ?? 0),
+          incline: String(exerciseRecord.incline ?? 0),
+          maxIncline: String(exerciseRecord.maxIncline ?? 0),
+          minIncline: String(exerciseRecord.minIncline ?? 0),
+          dateCongrats: String(exerciseRecord.dateCongrats || '')
+        });
         
         // 保存到storage，使用setStorage确保UTF-8编码正确处理
+        // 在保存成功后再跳转，确保数据已同步到本地存储
+        console.log('准备保存运动记录到本地存储，记录数量:', updatedHistory.length);
+        console.log('当前记录ID:', exerciseRecord.id);
+        
         ty.setStorage({
           key: 'exerciseHistory',
           data: updatedHistory,
@@ -1094,50 +1067,107 @@ onDpDataChange(_onDpDataChange);
             console.log('本地存储成功');
             // 验证存储的数据，确保中文正确
             console.log('存储的日期格式:', exerciseRecord.dateFormatted);
+            console.log('Exercise record saved successfully:', exerciseRecord.id);
+            console.log('Date formatted:', exerciseRecord.dateFormatted);
+            
+            // 验证数据是否真的保存了
+            const verifyHistory = ty.getStorageSync('exerciseHistory') || [];
+            console.log('验证：存储后的记录数量:', verifyHistory.length);
+            if (verifyHistory.length > 0) {
+              console.log('验证：最新记录ID:', verifyHistory[0].id);
+            }
+            
+            // 数据保存成功后，跳转到congrats页面
+            // 这样确保history和history-detail页面可以读取到最新数据
+            ty.navigateTo({
+              url: `/pages/congrats/congrats?${params.toString()}`
+            });
           },
           fail: (err) => {
-            console.error('本地存储失败:', err);
+            console.error('本地存储失败，尝试使用同步方法:', err);
+            // 降级方案：使用 setStorageSync
+            try {
+              ty.setStorageSync('exerciseHistory', updatedHistory);
+              console.log('使用同步方法保存成功');
+              
+              // 验证数据是否真的保存了
+              const verifyHistory = ty.getStorageSync('exerciseHistory') || [];
+              console.log('验证：存储后的记录数量:', verifyHistory.length);
+              if (verifyHistory.length > 0) {
+                console.log('验证：最新记录ID:', verifyHistory[0].id);
+              }
+              
+              // 数据保存成功后，跳转到congrats页面
+              ty.navigateTo({
+                url: `/pages/congrats/congrats?${params.toString()}`
+              });
+            } catch (syncError) {
+              console.error('setStorageSync 也失败:', syncError);
+              ty.showToast({
+                title: this.getI18n().t('data_save_failed'),
+                icon: 'none'
+              });
+              // 即使保存失败，也继续跳转到congrats页面（数据已通过URL参数传递）
+              ty.navigateTo({
+                url: `/pages/congrats/congrats?${params.toString()}`
+              });
+            }
           }
         });
-        console.log('Exercise record saved successfully:', exerciseRecord.id);
-        console.log('Date formatted:', exerciseRecord.dateFormatted);
       } catch (error) {
         console.error('Error saving exercise record to storage:', error);
-        ty.showToast({
-          title: this.getI18n().t('data_save_failed'),
-          icon: 'none'
+        // 尝试使用同步方法作为最后的降级方案
+        try {
+          // 重新获取历史记录并构建更新后的数组
+          const fallbackHistory = ty.getStorageSync('exerciseHistory') || [];
+          const fallbackUpdatedHistory = [exerciseRecord, ...fallbackHistory];
+          
+          console.log('尝试使用同步方法保存数据');
+          ty.setStorageSync('exerciseHistory', fallbackUpdatedHistory);
+          console.log('使用同步方法保存成功');
+          
+          // 验证数据是否真的保存了
+          const verifyHistory = ty.getStorageSync('exerciseHistory') || [];
+          console.log('验证：存储后的记录数量:', verifyHistory.length);
+          
+          saveSuccess = true;
+        } catch (syncError) {
+          console.error('setStorageSync 也失败:', syncError);
+          ty.showToast({
+            title: this.getI18n().t('data_save_failed'),
+            icon: 'none'
+          });
+          saveSuccess = false;
+        }
+        
+        // 准备跳转参数
+        const params = new URLSearchParams({
+          id: timestamp.toString(),
+          duration: elapsedSeconds.toString(),
+          speed: String(parseFloat(exerciseRecord.speed) || 0),
+          speedKmh: speedKmh,
+          calories: String(exerciseRecord.calories ?? 0),
+          distance: String(exerciseRecord.distance ?? 0),
+          hrBpm: String(exerciseRecord.hrBpm ?? exerciseRecord.heartRate ?? 0),
+          watt: String(exerciseRecord.watt ?? 0),
+          heartRate: String(exerciseRecord.heartRate ?? 0),
+          maxResistance: String(exerciseRecord.maxResistance ?? 0),
+          minResistance: String(exerciseRecord.minResistance ?? 0),
+          avgResistance: String(avgResistance ?? 0),
+          maxSpeed: String(exerciseRecord.maxSpeed ?? 0),
+          minSpeed: String(exerciseRecord.minSpeed ?? 0),
+          incline: String(exerciseRecord.incline ?? 0),
+          maxIncline: String(exerciseRecord.maxIncline ?? 0),
+          minIncline: String(exerciseRecord.minIncline ?? 0),
+          dateCongrats: String(exerciseRecord.dateCongrats || '')
         });
-        saveSuccess = false;
+        
+        // 即使保存失败，也继续跳转到congrats页面（数据已通过URL参数传递）
+        ty.navigateTo({
+          url: `/pages/congrats/congrats?${params.toString()}`
+        });
       }
     }
-    
-    // 即使保存失败，也继续跳转到congrats页面（数据已通过URL参数传递）
-    
-    // 跳转到congrats页面，通过URL参数传递数据
-    const params = new URLSearchParams({
-      id: timestamp.toString(),
-      duration: elapsedSeconds.toString(),
-      speed: String(parseFloat(exerciseRecord.speed) || 0),
-      speedKmh: speedKmh,
-      calories: String(exerciseRecord.calories ?? 0),
-      distance: String(exerciseRecord.distance ?? 0),
-      hrBpm: String(exerciseRecord.hrBpm ?? exerciseRecord.heartRate ?? 0),
-      watt: String(exerciseRecord.watt ?? 0),
-      heartRate: String(exerciseRecord.heartRate ?? 0),
-      maxResistance: String(exerciseRecord.maxResistance ?? 0),
-      minResistance: String(exerciseRecord.minResistance ?? 0),
-      avgResistance: String(avgResistance ?? 0),
-      maxSpeed: String(exerciseRecord.maxSpeed ?? 0),
-      minSpeed: String(exerciseRecord.minSpeed ?? 0),
-      incline: String(exerciseRecord.incline ?? 0),
-      maxIncline: String(exerciseRecord.maxIncline ?? 0),
-      minIncline: String(exerciseRecord.minIncline ?? 0),
-      dateCongrats: String(exerciseRecord.dateCongrats || '')
-    });
-    
-    ty.navigateTo({
-      url: `/pages/congrats/congrats?${params.toString()}`
-    });
   },
 
   buildExerciseRecord(now) {

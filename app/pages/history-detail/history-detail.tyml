@@ -34,6 +34,28 @@
           <text class="stat-val">{{record.distance || '50.1'}}</text>
         </view>
       </view>
+      <view class="card-extra">
+        <view class="stat-item">
+          <text class="stat-label">{{maxSpeedLabel}}</text>
+          <text class="stat-val">{{record.maxSpeed || '0.0'}}</text>
+        </view>
+        <view class="stat-divider"></view>
+        <view class="stat-item">
+          <text class="stat-label">{{minSpeedLabel}}</text>
+          <text class="stat-val">{{record.minSpeed || '0.0'}}</text>
+        </view>
+      </view>
+      <view class="card-extra">
+        <view class="stat-item">
+          <text class="stat-label">{{maxInclineLabel}}</text>
+          <text class="stat-val">{{record.maxIncline || '0.0'}}</text>
+        </view>
+        <view class="stat-divider"></view>
+        <view class="stat-item">
+          <text class="stat-label">{{minInclineLabel}}</text>
+          <text class="stat-val">{{record.minIncline || '0.0'}}</text>
+        </view>
+      </view>
     </view>
 
     <!-- Speed、Calories 卡片 -->

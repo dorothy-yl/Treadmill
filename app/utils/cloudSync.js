@@ -1,6 +1,6 @@
 /**
  * 云端同步工具模块
- * 用于通过 DP 点 112 实现历史记录的云端同步
+ * 用于通过 DP 点 113 实现历史记录的云端同步
  */
 
 // 尝试导入 commonApi，如果失败则使用备用方案
@@ -132,7 +132,7 @@ function validateTipRecord(tip) {
 }
 
 /**
- * 将历史记录数组或单条记录格式化为 DP 点 112 需要的 JSON 字符串格式
+ * 将历史记录数组或单条记录格式化为 DP 点 113 需要的 JSON 字符串格式
  * @param {Array|Object} historyData - 历史记录数组或单条记录对象
  * @returns {String} JSON 字符串
  */
@@ -191,9 +191,12 @@ function formatHistoryForDp112(historyData) {
           record.incline !== undefined ? record.incline : (record.Load !== undefined ? record.Load : (record.load !== undefined ? record.load : 0)),
           0
         );
-        const avgResistanceValue = safeNumber(record.avgResistance, record.load !== undefined ? safeNumber(record.load, 0) : 0);
         const maxResistanceValue = safeInt(record.maxResistance, 0);
         const minResistanceValue = safeInt(record.minResistance, 0);
+        const maxSpeedValue = safeNumber(record.maxSpeed, 0);
+        const minSpeedValue = safeNumber(record.minSpeed, 0);
+        const maxInclineValue = safeNumber(record.maxIncline, 0);
+        const minInclineValue = safeNumber(record.minIncline, 0);
 
         let dateMs = null;
         if (record.date !== undefined && record.date !== null) {
@@ -221,8 +224,11 @@ function formatHistoryForDp112(historyData) {
           heartRate: heartRateValue,
           speedKmh: Number(speedKmhValue.toFixed(1)),
           incline: Number(inclineValue.toFixed(1)),
-          avgResistance: Number(avgResistanceValue.toFixed(1)),
-          isGoalMode: record.isGoalMode === true
+          isGoalMode: record.isGoalMode === true,
+          maxSpeed: Number(maxSpeedValue.toFixed(1)),
+          minSpeed: Number(minSpeedValue.toFixed(1)),
+          maxIncline: Number(maxInclineValue.toFixed(1)),
+          minIncline: Number(minInclineValue.toFixed(1))
         };
 
         if (maxResistanceValue !== 0) {
@@ -382,7 +388,7 @@ function formatTipsForDp113(tipsData) {
 }
 
 /**
- * 将历史记录通过 DP 点 112 上报到云端
+ * 将历史记录通过 DP 点 113 上报到云端
  * @param {String} deviceId - 设备 ID
  * @param {Array|Object} historyData - 历史记录数据（可以是数组或单条记录）
  * @returns {Promise} Promise 对象
@@ -480,7 +486,7 @@ function saveHistoryToCloud(deviceId, historyData) {
 }
 
 /**
- * 从云端获取 DP 点 112 的历史记录日志
+ * 从云端获取 DP 点 113 的历史记录日志
  * @param {String} deviceId - 设备 ID
  * @param {Object} options - 查询选项
  * @param {Number} options.offset - 偏移量，默认 0
@@ -514,7 +520,7 @@ function getHistoryFromCloud(deviceId, options = {}) {
 
     console.log('从云端获取历史记录，参数:', { deviceId, offset, limit: maxLimit, startTime, endTime, sortType });
 
-    // 使用统计接口获取 DP 点 112 的日志
+    // 使用统计接口获取 DP 点 113 的日志
     if (!commonApi || !commonApi.statApi) {
       console.warn('commonApi.statApi 不可用，无法从云端获取历史记录');
       reject(new Error('统计接口不可用，请确保已安装 @tuya/tuya-panel-api 并提交工单开通统计功能'));
@@ -617,7 +623,7 @@ function getDpReportLog(deviceId, options = {}) {
 
     console.log('获取 DP 点上报日志，参数:', { deviceId, offset, limit: maxLimit, sortType });
 
-    // 使用统计接口获取 DP 点 112 的日志
+    // 使用统计接口获取 DP 点 113 的日志
     if (!commonApi || !commonApi.statApi) {
       console.warn('commonApi.statApi 不可用，无法获取 DP 点上报日志');
       reject(new Error('统计接口不可用，请确保已安装 @tuya/tuya-panel-api 并提交工单开通统计功能'));
