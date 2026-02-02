@@ -319,10 +319,15 @@ Page({
       
       const speedValue = record.speedKmh !== undefined ? toNumber(record.speedKmh, 0) : toNumber(record.speed, 0);
       const caloriesValue = Math.round(toNumber(record.calories, 0)).toString();
-      const distanceValue = toFixedString(toNumber(record.distance, 0), 1, '0.0');
+      // 改进距离字段处理：支持多种数据格式和来源
+      const distanceRaw = record.distance !== undefined && record.distance !== null 
+        ? record.distance 
+        : (record.distanceKm !== undefined && record.distanceKm !== null ? record.distanceKm : null);
+      const distanceValue = toFixedString(toNumber(distanceRaw, NaN), 2, '0.00');
       const heartRateValue = Math.round(toNumber(record.heartRate, 0)).toString();
       const maxSpeedValue = toFixedString(toNumber(record.maxSpeed, NaN), 1, '0.0');
       const minSpeedValue = toFixedString(toNumber(record.minSpeed, NaN), 1, '0.0');
+      const inclineValue = toFixedString(toNumber(record.incline, NaN), 1, '0.0');
       const maxInclineValue = toFixedString(toNumber(record.maxIncline, NaN), 1, '0.0');
       const minInclineValue = toFixedString(toNumber(record.minIncline, NaN), 1, '0.0');
 
@@ -337,6 +342,7 @@ Page({
         heartRate: heartRateValue,
         maxSpeed: maxSpeedValue,
         minSpeed: minSpeedValue,
+        incline: inclineValue,
         maxIncline: maxInclineValue,
         minIncline: minInclineValue,
         fullRecord: record
@@ -592,6 +598,7 @@ Page({
         minResistance: fullRecord.minResistance ? fullRecord.minResistance.toString() : '0',
         maxSpeed: fullRecord.maxSpeed ? fullRecord.maxSpeed.toString() : '0',
         minSpeed: fullRecord.minSpeed ? fullRecord.minSpeed.toString() : '0',
+        incline: fullRecord.incline ? fullRecord.incline.toString() : '0',
         maxIncline: fullRecord.maxIncline ? fullRecord.maxIncline.toString() : '0',
         minIncline: fullRecord.minIncline ? fullRecord.minIncline.toString() : '0',
         heartRate: fullRecord.heartRate ? fullRecord.heartRate.toString() : '0',

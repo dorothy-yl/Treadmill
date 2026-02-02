@@ -28,6 +28,9 @@ Page({
     distanceLabel: '',
     maxResistanceLabel: '',
     trainingDurationLabel: '',
+    workoutTimeLabel: '',
+    inclineLabel: '',
+    distanceKmLabel: '',
     noDataLabel: ''
   },
 
@@ -110,6 +113,10 @@ Page({
     const titleValue = options.title || options.pageTitle || this.getI18n().t('quick_start');
     const isGoalMode = options.isGoalMode === 'true' || options.isGoalMode === true;
 
+    const inclineValue = options.incline !== undefined && options.incline !== null && options.incline !== ''
+      ? parseFloat(options.incline).toFixed(1)
+      : '0.0';
+
     return {
       id: parseInt(options.id) || Date.now(),
       duration: this.formatTime(durationSeconds),
@@ -124,6 +131,7 @@ Page({
       maxResistance: options.maxResistance || '0',
       minResistance: options.minResistance || '0',
       heartRate: options.heartRate || '0',
+      incline: inclineValue,
       isGoalMode: isGoalMode,
       pageTitle: titleValue
     };
@@ -132,8 +140,16 @@ Page({
   // 规范化本地记录字段（用于详情页展示）
   normalizeLocalRecord(record, options) {
     const normalized = { ...record };
-    if (normalized.distance && typeof normalized.distance === 'number') {
-      normalized.distance = normalized.distance.toFixed(1);
+    // 规范化 distance 字段
+    if (normalized.distance !== undefined && normalized.distance !== null) {
+      const distanceNum = typeof normalized.distance === 'number' 
+        ? normalized.distance 
+        : parseFloat(normalized.distance);
+      normalized.distance = Number.isFinite(distanceNum) ? distanceNum.toFixed(2) : '0.00';
+    } else if (options && options.distance !== undefined && options.distance !== null && options.distance !== '') {
+      normalized.distance = parseFloat(options.distance).toFixed(2);
+    } else {
+      normalized.distance = '0.00';
     }
     if (normalized.duration !== undefined) {
       const durationSeconds = typeof normalized.duration === 'number'
@@ -172,6 +188,17 @@ Page({
     }
     if (!normalized.pageTitle) {
       normalized.pageTitle = normalized.title;
+    }
+    // 规范化 incline 字段
+    if (normalized.incline !== undefined) {
+      const inclineNum = typeof normalized.incline === 'number' 
+        ? normalized.incline 
+        : parseFloat(normalized.incline);
+      normalized.incline = Number.isFinite(inclineNum) ? inclineNum.toFixed(1) : '0.0';
+    } else if (options && options.incline !== undefined && options.incline !== null && options.incline !== '') {
+      normalized.incline = parseFloat(options.incline).toFixed(1);
+    } else {
+      normalized.incline = '0.0';
     }
     return normalized;
   },
@@ -237,8 +264,11 @@ Page({
       speedKmhLabel: currentI18n.t('speed_kmh'),
       caloriesLabel: currentI18n.t('calories'),
       distanceLabel: currentI18n.t('distance'),
+      distanceKmLabel: currentI18n.t('distance_km_simple'),
       maxResistanceLabel: currentI18n.t('max_resistance'),
       trainingDurationLabel: currentI18n.t('training_duration'),
+      workoutTimeLabel: currentI18n.t('workout_time'),
+      inclineLabel: currentI18n.t('incline'),
       noDataLabel: currentI18n.t('no_records_today') || '暂无数据'
     });
     
