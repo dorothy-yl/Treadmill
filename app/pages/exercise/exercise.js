@@ -40,7 +40,7 @@ Page({
     formattedTime: '00:00:00',
     calories: 0,
     watt: 0,
-    speed: 0,
+    speed: 0.5,
     load: 1,
     incline: 0,
     gaugeProgressStyle: '',
@@ -106,6 +106,9 @@ Page({
   pendingSpeedValue: null,
   speedUnlockTimer: null,
   lastDeviceSpeedValue: null,
+  inclineUiLocked: false,
+  pendingInclineValue: null,
+  inclineUnlockTimer: null,
   
 
   /**
@@ -535,14 +538,21 @@ dpID.forEach(element => {
       const pending = this.pendingSpeedValue;
       const pendingNum = pending === null || pending === undefined ? null : Number(pending);
       const tolerance = 0.11;
-      this.lastDeviceSpeedValue = speedValue;
+      
       if (this.speedUiLocked && pendingNum !== null) {
+        // 在锁定期内，只接受与pendingSpeedValue匹配的值
         if (Math.abs(speedValue - pendingNum) <= tolerance) {
+          this.lastDeviceSpeedValue = speedValue;  // 只有匹配时才更新
           this.unlockSpeedUi();
-        } else {
-          return;
+          this.setData({ speed: speedValue.toFixed(1) });
+          this.trackSpeed(speedValue);
         }
+        // 不匹配的值完全忽略，不更新UI，也不更新lastDeviceSpeedValue
+        return;
       }
+      
+      // 未锁定状态，正常更新
+      this.lastDeviceSpeedValue = speedValue;
       this.setData({ speed: speedValue.toFixed(1) });
       this.trackSpeed(speedValue);
     }
@@ -658,11 +668,39 @@ dpID.forEach(element => {
   if(element.code == DP.incline) {
     console.log('扬升:', element.value);
     const inclineValue = Number(element.value);
+    if (!Number.isFinite(inclineValue)) {
+      return;
+    }
+    
+    const pending = this.pendingInclineValue;
+    const pendingNum = pending === null || pending === undefined ? null : Number(pending);
+    const tolerance = 0.5; // 坡度容差
+    
+    if (this.inclineUiLocked && pendingNum !== null) {
+      // 在锁定期内，只接受与pendingInclineValue匹配的值
+      if (Math.abs(inclineValue - pendingNum) <= tolerance) {
+        this.unlockInclineUi();
+        this.gaugeDpId = DP.incline;
+        this.setData({
+          incline: inclineValue,
+          load: inclineValue
+        });
+        // 同步更新视觉位置，确保显示值与滑块位置一致
+        this.updateGauge(inclineValue);
+        this.trackIncline(inclineValue);
+      }
+      // 不匹配的值完全忽略，不更新UI
+      return;
+    }
+    
+    // 未锁定状态，正常更新
     this.gaugeDpId = DP.incline;
     this.setData({
       incline: inclineValue,
       load: inclineValue
     });
+    // 同步更新视觉位置，确保显示值与滑块位置一致
+    this.updateGauge(inclineValue);
     this.trackIncline(inclineValue);
   }
   // DP 113 历史记录监听已移除 - 不再使用云端同步
@@ -1275,11 +1313,9 @@ throttle(func, delay) {
     
     if (this.tempLoad !== null && this.tempLoad !== this.data.load) {
       const finalLoad = this.tempLoad;
-      // 添加 50ms 延迟，平滑过渡视觉更新
-      setTimeout(() => {
-        this.updateGauge(finalLoad);
-        this.debouncedUpdateLoadNumber(finalLoad);
-      }, 50);
+      // 立即更新UI并锁定，避免设备上报旧值时跳回旧值
+      this.updateGauge(finalLoad);
+      this.lockInclineUi(finalLoad);
       
       // 设备命令发送逻辑不变
       this.queuePublishDps(
@@ -1331,6 +1367,34 @@ throttle(func, delay) {
     if (this.speedUnlockTimer) {
       clearTimeout(this.speedUnlockTimer);
       this.speedUnlockTimer = null;
+    }
+  },
+
+  lockInclineUi(targetIncline) {
+    this.inclineUiLocked = true;
+    const normalized = typeof targetIncline === 'number' ? targetIncline : parseFloat(targetIncline);
+    this.pendingInclineValue = Number.isFinite(normalized) ? Number(normalized) : null;
+    if (this.inclineUnlockTimer) {
+      clearTimeout(this.inclineUnlockTimer);
+      this.inclineUnlockTimer = null;
+    }
+    this.inclineUnlockTimer = setTimeout(() => {
+      const tolerance = 0.5; // 坡度容差
+      if (this.pendingInclineValue !== null) {
+        // 锁定期过后，如果设备还没上报匹配的值，解锁
+        this.inclineUiLocked = false;
+        this.pendingInclineValue = null;
+      }
+      this.inclineUnlockTimer = null;
+    }, 2000);
+  },
+
+  unlockInclineUi() {
+    this.inclineUiLocked = false;
+    this.pendingInclineValue = null;
+    if (this.inclineUnlockTimer) {
+      clearTimeout(this.inclineUnlockTimer);
+      this.inclineUnlockTimer = null;
     }
   },
 
