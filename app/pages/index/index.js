@@ -116,7 +116,7 @@ Page({
     // For now we want to match the screenshot exactly
     /*
     const today = new Date().toISOString().split('T')[0];
-    const history = ty.getStorageSync('exerciseHistory') || [];
+    const history = ty.getStorageSync('treadmill_history') || [];
     const todayRecords = history.filter(record => {
       const recordDate = record.date ? new Date(record.date).toISOString().split('T')[0] : '';
       return recordDate === today;

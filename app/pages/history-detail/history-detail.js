@@ -16,6 +16,7 @@ Page({
   },
   data: {
     record: null,
+    showEmptyState: false,
     // 国际化文本（初始化为空，在 onLoad 中根据系统语言设置）
     detailsLabel: '',
     quickStartLabel: '',
@@ -26,7 +27,8 @@ Page({
     caloriesLabel: '',
     distanceLabel: '',
     maxResistanceLabel: '',
-    trainingDurationLabel: ''
+    trainingDurationLabel: '',
+    noDataLabel: ''
   },
 
   // 格式化时长为 "HH:MM:SS" 格式
@@ -236,7 +238,8 @@ Page({
       caloriesLabel: currentI18n.t('calories'),
       distanceLabel: currentI18n.t('distance'),
       maxResistanceLabel: currentI18n.t('max_resistance'),
-      trainingDurationLabel: currentI18n.t('training_duration')
+      trainingDurationLabel: currentI18n.t('training_duration'),
+      noDataLabel: currentI18n.t('no_records_today') || '暂无数据'
     });
     
     ty.hideMenuButton({ success: () => {
@@ -246,8 +249,17 @@ Page({
     } });
     
     const id = options.id ? parseInt(options.id) : null;
-    const history = ty.getStorageSync('exerciseHistory') || [];
+    // 使用对象参数形式获取存储数据
+    const storageResult = ty.getStorageSync({ key: 'treadmill_history' });
+    // 处理返回结果：可能是直接返回数据，也可能是 { data: ... } 格式
+    const rawHistory = (storageResult && storageResult.data !== undefined) ? storageResult.data : storageResult;
+    const history = (rawHistory && Array.isArray(rawHistory)) ? rawHistory : [];
     const hasOptionsData = !!(options.title || options.duration || options.distance || options.speed || options.calories);
+
+    // 确保history是数组
+    if (!Array.isArray(history)) {
+      console.warn('treadmill_history is not an array');
+    }
 
     let record = null;
     if (hasOptionsData) {
@@ -262,6 +274,10 @@ Page({
     }
 
     if (!record) {
+      this.setData({
+        showEmptyState: true,
+        record: null
+      });
       ty.showToast({
         title: '记录不存在',
         icon: 'none'
@@ -270,7 +286,8 @@ Page({
     }
 
     this.setData({
-      record: record
+      record: record,
+      showEmptyState: false
     });
     
     // 设置 dp 点监听（在数据加载后）

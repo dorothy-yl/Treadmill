@@ -82,8 +82,11 @@ Page({
       };
     } else {
       // 如果没有URL参数，从storage获取最新记录
-      const history = ty.getStorageSync('exerciseHistory') || [];
-      if (history.length > 0) {
+      const storageResult = ty.getStorageSync({ key: 'treadmill_history' });
+      // 处理返回结果：可能是直接返回数据，也可能是 { data: ... } 格式
+      const rawHistory = (storageResult && storageResult.data !== undefined) ? storageResult.data : storageResult;
+      const history = (rawHistory && Array.isArray(rawHistory)) ? rawHistory : [];
+      if (Array.isArray(history) && history.length > 0) {
         exerciseData = history[0]; // 最新的记录
       }
     }

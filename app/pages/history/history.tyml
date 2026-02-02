@@ -51,28 +51,7 @@
           <text class="stat-val">{{item.distance}}</text>
         </view>
       </view>
-      <view class="card-extra">
-        <view class="stat-item">
-          <text class="stat-label">{{maxSpeedLabel}}</text>
-          <text class="stat-val">{{item.maxSpeed}}</text>
-        </view>
-        <view class="stat-divider"></view>
-        <view class="stat-item">
-          <text class="stat-label">{{minSpeedLabel}}</text>
-          <text class="stat-val">{{item.minSpeed}}</text>
-        </view>
-      </view>
-      <view class="card-extra">
-        <view class="stat-item">
-          <text class="stat-label">{{maxInclineLabel}}</text>
-          <text class="stat-val">{{item.maxIncline}}</text>
-        </view>
-        <view class="stat-divider"></view>
-        <view class="stat-item">
-          <text class="stat-label">{{minInclineLabel}}</text>
-          <text class="stat-val">{{item.minIncline}}</text>
-        </view>
-      </view>
+     
     </view>
   </scroll-view>
 

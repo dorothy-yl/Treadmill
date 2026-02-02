@@ -344,25 +344,49 @@ Page({
     });
   },
 
-  // 从本地存储加载记录（作为降级方案）
+  // 从本地存储加载记录（treadmill_history）
   loadRecordsForDateFromLocal(date) {
     try {
-      const history = ty.getStorageSync('exerciseHistory') || [];
+      // 使用对象参数形式获取存储数据
+      const storageResult = ty.getStorageSync({ key: 'treadmill_history' });
+      // 处理返回结果：可能是直接返回数据，也可能是 { data: ... } 格式
+      const rawHistory = (storageResult && storageResult.data !== undefined) ? storageResult.data : storageResult;
+      const history = (rawHistory && Array.isArray(rawHistory)) ? rawHistory : [];
+      
+      // 确保history是数组
+      if (!Array.isArray(history)) {
+        console.warn('treadmill_history is not an array, resetting to empty array');
+        this.setData({
+          records: []
+        });
+        return;
+      }
+      
       const targetDateStr = this.formatDateString(date);
       
       // 筛选出当天的记录
       const dayRecords = history.filter(record => {
-        const recordDateStr = this.getDateStringFromRecord(record);
-        return recordDateStr === targetDateStr;
+        if (!record) return false;
+        try {
+          const recordDateStr = this.getDateStringFromRecord(record);
+          return recordDateStr === targetDateStr;
+        } catch (err) {
+          console.warn('Error processing record:', err, record);
+          return false;
+        }
       });
       
       const formattedRecords = this.formatRecordsForDisplay(dayRecords);
       
       // 按时间排序（最新的在前）
       formattedRecords.sort((a, b) => {
-        const dateA = new Date(a.fullRecord.date || 0).getTime();
-        const dateB = new Date(b.fullRecord.date || 0).getTime();
-        return dateB - dateA;
+        try {
+          const dateA = new Date(a.fullRecord?.date || 0).getTime();
+          const dateB = new Date(b.fullRecord?.date || 0).getTime();
+          return dateB - dateA;
+        } catch (err) {
+          return 0;
+        }
       });
       
       this.setData({
@@ -428,7 +452,9 @@ Page({
   // 检查指定日期是否有历史记录
   checkDateHasRecord(dateStr) {
     try {
-      const history = ty.getStorageSync('exerciseHistory') || [];
+      const storageResult = ty.getStorageSync({ key: 'treadmill_history' });
+      const rawHistory = (storageResult && storageResult.data !== undefined) ? storageResult.data : storageResult;
+      const history = (rawHistory && Array.isArray(rawHistory)) ? rawHistory : [];
       if (Array.isArray(history) && history.length > 0) {
         const hasRecord = history.some(record => {
           const recordDateStr = this.getDateStringFromRecord(record);
